@@ -1,3 +1,4 @@
+# github's self-generated CMake .gitignore templete.
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
@@ -9,3 +10,9 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps
+
+# begin of custom path.
+.idea/
+release/
+submodules/
+wav_examples/
