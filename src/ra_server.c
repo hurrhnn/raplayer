@@ -82,6 +82,12 @@ struct pcm {
     struct pcm_data_chunk pcmDataChunk;
 };
 
+struct client_socket_info {
+    int sock_fd;
+    struct sockaddr_in *client_addr;
+    int *socket_len;
+};
+
 void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fread(pPcm->pcmHeader.chunk_id, DWORD, 1, fin);
     fread(&pPcm->pcmHeader.chunk_size, DWORD, 1, fin);
@@ -151,25 +157,25 @@ void server_init_sock_buffer(char *buffer, int size) {
     memset(buffer, 0, size);
 }
 
-int ready_sock_server_seq1(int sock_fd, char *buffer, struct sockaddr_in *p_client_addr, int *socket_len) {
+int ready_sock_server_seq1(char *buffer, int buffer_size, struct client_socket_info *p_client_socket_info) {
 
-    struct sockaddr_in client_addr = *p_client_addr;
-    recvfrom(sock_fd, buffer, sizeof(buffer), 0, (struct sockaddr *) &client_addr, (socklen_t *) socket_len);
+    struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
+    recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr, (socklen_t *) p_client_socket_info->socket_len);
     buffer[strlen(buffer) - 1] = '\0';
 
     //print details of the client.
     printf("Connection from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
     fflush(stdout);
 
-    *p_client_addr = client_addr;
+    *p_client_socket_info->client_addr = client_addr;
     if (strncmp(buffer, "HELLO", strlen(buffer)) == 0)
         return sizeof(client_addr);
     else
         return 0;
 }
 
-bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct sockaddr_in *p_client_addr, int sock_addr_len) {
-    struct sockaddr_in client_addr = *p_client_addr;
+bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct client_socket_info *p_client_socket_info) {
+    struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
     int stream_info_size = DWORD + WORD * 2, buffer_size = 5;
     char *stream_info = malloc(stream_info_size);
@@ -180,10 +186,11 @@ bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct sockaddr_
     char *buffer = (char *) calloc(buffer_size, sizeof(char));
 
     sprintf(buffer, "%d", stream_info_size);
-    sendto(sock_fd, buffer, strlen(buffer), 0, (struct sockaddr *) &client_addr, sock_addr_len);
+    sendto(sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
+           (socklen_t) *p_client_socket_info->socket_len);
     server_init_sock_buffer(buffer, buffer_size);
 
-    recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
+    recvfrom(sock_fd, buffer, buffer_size, 0, NULL, NULL);
     if (strcmp(buffer, "OK") != 0) {
         fflush(stdout);
         return 0;
@@ -194,15 +201,15 @@ bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct sockaddr_
 
     if (stream_info_size ==
         sendto(sock_fd, stream_info, stream_info_size, 0,
-               (struct sockaddr *) &client_addr, sock_addr_len)) {
-        if (recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL) &&
+               (struct sockaddr *) &client_addr, (socklen_t) *p_client_socket_info->socket_len)) {
+        if (recvfrom(sock_fd, buffer, buffer_size, 0, NULL, NULL) &&
             stream_info_size == strtol(buffer, NULL, 10)) {
 
             buffer_size = DWORD;
             server_init_sock_buffer(buffer, buffer_size);
 
             sendto(sock_fd, &pcm_struct.pcmDataChunk.chunk_size, DWORD, 0, (struct sockaddr *) &client_addr,
-                   sock_addr_len);
+                   (socklen_t) *p_client_socket_info->socket_len);
 
             recvfrom(sock_fd, buffer, DWORD, 0, NULL, NULL);
             if (strcmp(buffer, "OK") == 0)
@@ -226,8 +233,8 @@ void *provide_20ms_opus_timer() {
 }
 
 void
-provide_20ms_opus_stream(char *c_bits, int nbBytes, int sock_fd, struct sockaddr_in *p_client_addr, int sock_addr_len) {
-    struct sockaddr_in client_addr = *p_client_addr;
+provide_20ms_opus_stream(char *c_bits, int nbBytes, struct client_socket_info *p_client_socket_info) {
+    struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
     const int nbBytes_len = floor(log10(nbBytes) + 1);
     char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, WORD);
@@ -239,9 +246,9 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, int sock_fd, struct sockaddr
 
     while (true) {
         if (is_20ms) {
-            sendto(sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, 0,
+            sendto(p_client_socket_info->sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, 0,
                    (const struct sockaddr *) &client_addr,
-                   sock_addr_len); // Send opus stream.
+                   (socklen_t) *p_client_socket_info->socket_len); // Send opus stream.
             is_20ms = false;
             break;
         }
@@ -249,16 +256,17 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, int sock_fd, struct sockaddr
 }
 
 void server_signal_timer(int signal) {
-    puts("Client interrupted raplayer. Program now Exit.");
+    puts("\nClient has been interrupted raplayer. Program now Exit.");
     exit(signal);
 }
 
 _Noreturn void *recv_heartbeat(void *p_sock_fd)
 {
-    int sock_fd = *(int *)p_sock_fd;
+    int sock_fd = *(int *) p_sock_fd;
+    char buffer[2];
+
     while (true) {
         alarm(2);
-        char buffer[2];
         recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
     }
 }
@@ -336,12 +344,15 @@ int ra_server(int argc, char **argv) {
     fflush(stdout);
 
     struct sockaddr_in server_addr, client_addr;
-    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(client_addr);
-    char *buffer = (char *) calloc(6, sizeof(char));
+    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(client_addr), buffer_size = 6;
+    char *buffer = (char *) calloc(buffer_size, sizeof(char));
 
-    if ((socket_len = ready_sock_server_seq1(sock_fd, buffer, &client_addr, &socket_len))) {
+    struct client_socket_info *client_socket_info = (struct client_socket_info *)malloc(sizeof(struct client_socket_info));
+    client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
+
+    if ((socket_len = ready_sock_server_seq1(buffer, buffer_size, client_socket_info))) {
         alarm(5); // Start time-out timer.
-        if (ready_sock_server_seq2(sock_fd, *pcm_struct, &client_addr, socket_len))
+        if (ready_sock_server_seq2(sock_fd, *pcm_struct, client_socket_info))
             printf("Preparing socket sequence has been Successfully Completed.");
         else {
             fprintf(stdout, "A server socket preparation sequence Failed.\n");
@@ -362,7 +373,7 @@ int ra_server(int argc, char **argv) {
     int err;
 
     /*Create a new encoder state */
-    encoder = opus_encoder_create((opus_int32) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
+    encoder = opus_encoder_create((opus_int16) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
                                   APPLICATION,
                                   &err);
     if (err < 0) {
@@ -411,7 +422,7 @@ int ra_server(int argc, char **argv) {
         }
 
         // Send encoded PCM data.
-        provide_20ms_opus_stream((char *) c_bits, nbBytes, sock_fd, &client_addr, socket_len);
+        provide_20ms_opus_stream((char *) c_bits, nbBytes, client_socket_info);
     }
     // Send EOS Packet.
     sendto(sock_fd, EOS, strlen(EOS), 0, (struct sockaddr *) &client_addr, socket_len);
