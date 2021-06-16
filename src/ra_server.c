@@ -373,7 +373,7 @@ int ra_server(int argc, char **argv) {
     int err;
 
     /*Create a new encoder state */
-    encoder = opus_encoder_create((opus_int16) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
+    encoder = opus_encoder_create((opus_int32) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
                                   APPLICATION,
                                   &err);
     if (err < 0) {
