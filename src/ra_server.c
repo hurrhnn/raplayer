@@ -103,15 +103,11 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
             exit(EXIT_FAILURE);
         }
 
-        if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'd') {
-            if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a') {
-                if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 't') {
-                    if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a') { // A PCM *d a t a* signature.
+        if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'd')
+            if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a')
+                if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 't')
+                    if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a')  // A PCM *d a t a* signature.
                         break;
-                    }
-                }
-            }
-        }
     }
 
     strcpy(pPcm->pcmDataChunk.chunk_id, tmpBytes);
@@ -241,7 +237,7 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, int sock_fd, struct sockaddr
 
     memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, MAX_PACKET_SIZE);
 
-    while (1) {
+    while (true) {
         if (is_20ms) {
             sendto(sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, 0,
                    (const struct sockaddr *) &client_addr,
@@ -253,7 +249,18 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, int sock_fd, struct sockaddr
 }
 
 void server_signal_timer(int signal) {
+    puts("Client interrupted raplayer. Program now Exit.");
     exit(signal);
+}
+
+_Noreturn void *recv_heartbeat(void *p_sock_fd)
+{
+    int sock_fd = *(int *)p_sock_fd;
+    while (true) {
+        alarm(2);
+        char buffer[2];
+        recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
+    }
 }
 
 int ra_server(int argc, char **argv) {
@@ -377,10 +384,10 @@ int ra_server(int argc, char **argv) {
         fseek(stdin, 0, SEEK_END);
         fcntl(fileno(fin), F_SETFL, fcntl(fileno(fin), F_GETFL) | O_NONBLOCK);
     }
-    alarm(0); // Stop time-out timer.
 
-    pthread_t opus_timer;
+    pthread_t opus_timer, heartbeat_receiver;
     pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus timer.
+    pthread_create(&heartbeat_receiver, NULL, recv_heartbeat, &sock_fd);
 
     int nbBytes;
     while (1) {

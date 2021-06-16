@@ -53,13 +53,19 @@ struct stream_info {
     short bits_per_sample;
 };
 
+struct server_socket_info {
+    int sock_fd;
+    struct sockaddr_in server_addr;
+    int socket_len;
+};
+
 int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_server_addr) {
     struct sockaddr_in server_addr = *p_server_addr;
     int sock_fd;
 
     // Creating socket file descriptor.
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        fprintf(stdout, "Socket Creation Failed.\n");
+        fprintf(stdout, "Error: Socket Creation Failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -69,7 +75,7 @@ int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_se
     server_addr.sin_port = htons(port);
 
     if (!inet_aton(str_server_addr, &server_addr.sin_addr)) {
-        fprintf(stdout, "Convert Internet host address Failed.\n");
+        fprintf(stdout, "Error: Convert Internet host address Failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -130,6 +136,17 @@ void *print_info()
     while (!EOS) {
         printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB\r", symbols[++print_cnt % DWORD], (double)(sum_frame_cnt * 20) / 1000, (double)(sum_frame_size) / 1000);
         fflush(stdout);
+        usleep(250000);
+    }
+    return EXIT_SUCCESS;
+}
+
+void *send_heartbeat(void *p_server_socket_info)
+{
+    while (!EOS) {
+        sendto(((struct server_socket_info *)p_server_socket_info)->sock_fd, OK, sizeof(OK), 0,
+                (struct sockaddr *) &((struct server_socket_info *)p_server_socket_info)->server_addr,
+                        ((struct server_socket_info *)p_server_socket_info)->socket_len);
         usleep(250000);
     }
     return EXIT_SUCCESS;
@@ -207,8 +224,12 @@ int ra_client(int argc, char **argv) {
     printf("\nStarted Playing Opus Packets...\n");
     fflush(stdout);
 
-    pthread_t info_printer;
+    pthread_t info_printer, heartbeat_sender;
     pthread_create(&info_printer, NULL, print_info, NULL); // Activate opus timer.
+
+    struct server_socket_info *server_socket_info = (struct server_socket_info *)malloc(sizeof(struct server_socket_info));
+    server_socket_info->sock_fd = sock_fd, server_socket_info->server_addr = server_addr, server_socket_info->socket_len = socket_len;
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *)server_socket_info);
 
     Pa_StartStream(stream);
     while (1) {
