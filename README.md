@@ -1,5 +1,5 @@
 # raplayer
-The raplayer is a C-based cross-platfrom remote audio player,<br> can play simple files or streams.
+The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple files or streams.
 
 ## Getting Started
 
@@ -7,7 +7,7 @@ The raplayer is a C-based cross-platfrom remote audio player,<br> can play simpl
 ```
 Windows: cygwin environment only tested, MSVC NOT supported yet.
 Linux: supported.
-MacOSX: supported.
+MacOS: supported.
 ```
 
 ### Prerequisites
@@ -16,7 +16,7 @@ MacOSX: supported.
 
 Windows: `cmake make gcc`<br>
 Linux: `alsa lib development package(debian: libasound-dev, RHEL: alsa-lib-devel) cmake make gcc`<br>
-MacOSX: `cmake make gcc`<br>
+MacOS: `cmake make gcc`<br>
 
 Optional package: `ffmpeg`
 
@@ -72,13 +72,13 @@ Usage: ./raplayer --client <Server Address> [Port]
 ./raplayer --server s16le.pcm
 ```
 
- - play audio file using ffmpeg.
+ - Play audio file using ffmpeg.
 
 ```bash
 ffmpeg -i audio.mp3 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server -
 ```
 
- - play audio **stream** using ffmpeg.
+ - Play audio **stream** using ffmpeg.
 
 ```bash
 ffmpeg -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server --stream -
