@@ -15,7 +15,7 @@ MacOS: supported.
 #### You must pre-install the corresponding package for each OS.
 
 Windows: `cmake make gcc`<br>
-Linux: `alsa lib development package(debian: libasound-dev, RHEL: alsa-lib-devel) cmake make gcc`<br>
+Linux: `alsa-lib-development-package(debian: libasound-dev, RHEL: alsa-lib-devel) cmake make gcc`<br>
 MacOS: `cmake make gcc`<br>
 
 Optional package: `ffmpeg`
@@ -90,7 +90,7 @@ ffmpeg -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s
 
 ## License
 
-This project is licensed under the GPLv3 License - see the [LICENSE.md](https://github.com/hurrhnn/raplayer/blob/main/LICENSE) file for details.
+This project is licensed under the GPLv3 License - see the [LICENSE](https://github.com/hurrhnn/raplayer/blob/main/LICENSE) file for details.
 
 ## Contributions
 
