@@ -1,5 +1,7 @@
 # raplayer
-The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple files or streams.
+The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple audio files or streams.
+
+![image](https://user-images.githubusercontent.com/40728528/123002803-48fa3880-d3ed-11eb-9f08-17cd2816a8df.png)
 
 ## Getting Started
 
