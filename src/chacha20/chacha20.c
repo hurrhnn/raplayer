@@ -30,7 +30,7 @@ static void chacha20_init_block(struct chacha20_context *ctx, uint8_t key[], uin
     memcpy(ctx->key, key, sizeof(ctx->key));
     memcpy(ctx->nonce, nonce, sizeof(ctx->nonce));
 
-    const uint8_t *magic_constant = (uint8_t *) "expand 32-byte k";
+    const uint8_t *magic_constant = (uint8_t *) "DEADBEEFCAFEBABE";
     ctx->state[0] = pack_4bytes(magic_constant + 0 * 4);
     ctx->state[1] = pack_4bytes(magic_constant + 1 * 4);
     ctx->state[2] = pack_4bytes(magic_constant + 2 * 4);
@@ -57,7 +57,7 @@ static void chacha20_block_set_counter(struct chacha20_context *ctx, uint64_t co
 }
 
 static void chacha20_block_next(struct chacha20_context *ctx) {
-    // Mix the bytes a lot and hope that nobody finds out how to undo it.
+    /* Mix the bytes a lot and hope that nobody finds out how to undo it. */
     for (int i = 0; i < 16; i++) ctx->key_stream[i] = ctx->state[i];
 
 #define CHACHA20_QUARTERROUND(x, a, b, c, d) \
