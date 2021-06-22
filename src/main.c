@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sodium.h>
 #include <portaudio.h>
 
 #include "ra_client.h"
@@ -39,17 +38,12 @@ void print_usage(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    if (sodium_init() < 0) {
-        fprintf(stderr,"Sodium error: Sodium not supported this Environment.");
-        exit(EXIT_FAILURE);
-    }
-
     fclose(stderr); // Close stderr to avoid showing logging in the alsa-lib.
     int err = Pa_Initialize();
 
     if(err != paNoError) {
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     print_usage(argc, argv);
