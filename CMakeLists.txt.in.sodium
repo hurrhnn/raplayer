@@ -1,8 +1,0 @@
-cmake_minimum_required(VERSION 3.1)
-project(libsodium NONE)
-include(ExternalProject)
-
-ExternalProject_Add(libsodium
-        URL https://download.libsodium.org/libsodium/releases/libsodium-1.0.18.tar.gz
-        CONFIGURE_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/install && chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libsodium/src/libsodium/configure && ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libsodium/src/libsodium/configure --prefix=${CMAKE_CURRENT_BINARY_DIR}/install --enable-static=yes
-        PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libsodium/)
