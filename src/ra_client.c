@@ -25,9 +25,10 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <pthread.h>
 #include <opus/opus.h>
 #include <portaudio.h>
-#include <pthread.h>
+#include "chacha20/chacha20.h"
 
 #define BYTE 1
 #define WORD 2
@@ -48,16 +49,18 @@
 // in this very specific case, the max packet size is multiplied by 2 or 3 respectively
 
 struct stream_info {
-    short channels;
-    long sample_rate;
-    short bits_per_sample;
+    int16_t channels;
+    int32_t sample_rate;
+    int16_t bits_per_sample;
 };
 
 struct server_socket_info {
     int sock_fd;
-    struct sockaddr_in server_addr;
-    int socket_len;
+    struct sockaddr_in *server_addr;
+    int *socket_len;
 };
+
+unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket_info);
 
 int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_server_addr) {
     struct sockaddr_in server_addr = *p_server_addr;
@@ -85,68 +88,89 @@ int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_se
 
 void client_init_sock_buffer(char *buffer, int size) {
     buffer = realloc(buffer, size);
-    memset(buffer, 0, sizeof(&buffer));
+    memset(buffer, 0, size);
 }
 
-long ready_sock_client_seq1(struct stream_info *streamInfo, int sock_fd, char *buffer, struct sockaddr_in *p_server_addr,
-                            int socket_len) {
-    struct sockaddr_in server_addr = *p_server_addr;
-    sendto(sock_fd, HELLO, sizeof(HELLO), 0, (struct sockaddr *) &server_addr, socket_len);
+uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_socket_info *p_server_socket_info) {
+    struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
+    const int buffer_size = 6;
+    char *buffer = calloc(buffer_size, BYTE);
+
+    sendto(p_server_socket_info->sock_fd, HELLO, sizeof(HELLO), 0, (struct sockaddr *) &server_addr,
+           *p_server_socket_info->socket_len);
 
     // Receive PCM info from server.
-    recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
+    recvfrom(p_server_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL);
     int info_len = (int) strtol(buffer, NULL, 10);
     client_init_sock_buffer(buffer, info_len);
 
-    sendto(sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr, socket_len);
-    recvfrom(sock_fd, buffer, info_len, 0, NULL, NULL);
+    sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
+           *p_server_socket_info->socket_len);
+    recvfrom(p_server_socket_info->sock_fd, buffer, info_len, 0, NULL, NULL);
 
     memcpy(&streamInfo->channels, buffer, WORD);
     memcpy(&streamInfo->sample_rate, buffer + WORD, DWORD);
     memcpy(&streamInfo->bits_per_sample, buffer + WORD + DWORD, WORD);
 
-    client_init_sock_buffer(buffer, 5);
+    client_init_sock_buffer(buffer, DWORD);
     sprintf(buffer, "%d", info_len);
 
-    if (sendto(sock_fd, buffer, strlen(buffer), 0, (struct sockaddr *) &server_addr, socket_len) > 0) {
+    if (sendto(p_server_socket_info->sock_fd, buffer, strlen(buffer), 0, (struct sockaddr *) &server_addr,
+               *p_server_socket_info->socket_len) > 0) {
         memset(buffer, 0, DWORD);
-        recvfrom(sock_fd, buffer, DWORD, 0, NULL, NULL);
+        recvfrom(p_server_socket_info->sock_fd, buffer, DWORD, 0, NULL, NULL);
 
-        long *orig_pcm_size = malloc(DWORD);
+        uint32_t *orig_pcm_size = malloc(DWORD);
         memcpy(orig_pcm_size, buffer, DWORD);
 
-        sendto(sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr, socket_len);
+        sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
+               *p_server_socket_info->socket_len);
+        free(buffer);
         return *orig_pcm_size;
     }
+    free(buffer);
     return 0;
 }
 
-void client_signal_timer(int signal)
-{
+unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket_info) {
+    struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
+    const int crypto_payload_size = crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES;
+    unsigned char *crypto_payload = calloc(crypto_payload_size, BYTE);
+
+    if (crypto_payload_size ==
+        recvfrom(p_server_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, NULL, NULL)) {
+        sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
+               (socklen_t) *p_server_socket_info->socket_len);
+        return crypto_payload;
+    }
+    return NULL;
+}
+
+void client_signal_timer(int signal) {
     exit(signal);
 }
 
 long EOS = 0, sum_frame_cnt = 0, sum_frame_size = 0;
-void *print_info()
-{
+
+void *print_connection_info() {
     int print_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
     puts("");
 
     while (!EOS) {
-        printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB\r", symbols[++print_cnt % DWORD], (double)(sum_frame_cnt * 20) / 1000, (double)(sum_frame_size) / 1000);
+        printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB\r", symbols[++print_cnt % DWORD],
+               (double) (sum_frame_cnt * 20) / 1000, (double) (sum_frame_size) / 1000);
         fflush(stdout);
         usleep(250000);
     }
     return EXIT_SUCCESS;
 }
 
-void *send_heartbeat(void *p_server_socket_info)
-{
+void *send_heartbeat(void *p_server_socket_info) {
     while (!EOS) {
         sendto(((struct server_socket_info *) p_server_socket_info)->sock_fd, OK, sizeof(OK), 0,
-                (struct sockaddr *) &((struct server_socket_info *) p_server_socket_info)->server_addr,
-                        ((struct server_socket_info *) p_server_socket_info)->socket_len);
+               (struct sockaddr *) ((struct server_socket_info *) p_server_socket_info)->server_addr,
+               *((struct server_socket_info *) p_server_socket_info)->socket_len);
         usleep(250000);
     }
     return EXIT_SUCCESS;
@@ -173,20 +197,27 @@ int ra_client(int argc, char **argv) {
     else
         port = (int) strtol(argv[3], NULL, 10);
 
-    alarm(2); // Start time-out timer.
-    char *buffer = (char *) calloc(6, BYTE);
-    int sock_fd = client_init_socket(argv[2], port, (struct sockaddr_in *) &server_addr), socket_len = sizeof(server_addr);
+    alarm(2); // Start time out timer.
+    int sock_fd = client_init_socket(argv[2], port,
+                                     (struct sockaddr_in *) &server_addr), socket_len = sizeof(server_addr);
 
-    long orig_pcm_size = ready_sock_client_seq1((struct stream_info *) pStreamInfo, sock_fd, buffer, &server_addr, socket_len);
+    struct server_socket_info *server_socket_info = malloc(sizeof(struct server_socket_info));
+    server_socket_info->sock_fd = sock_fd, server_socket_info->server_addr = &server_addr, server_socket_info->socket_len = &socket_len;
+
+    uint32_t orig_pcm_size = ready_sock_client_seq1(pStreamInfo, server_socket_info);
+
+    struct chacha20_context ctx;
+    unsigned char *crypto_payload = ready_sock_client_seq2(server_socket_info);
+    chacha20_init_context(&ctx, crypto_payload, crypto_payload + crypto_stream_chacha20_NONCEBYTES, 0);
 
     printf("Received audio info: \n");
     printf("Channels: %hd\n", pStreamInfo->channels);
-    printf("Sample rate: %ld\n", pStreamInfo->sample_rate);
+    printf("Sample rate: %d\n", pStreamInfo->sample_rate);
     printf("Bit per sample: %hd\n", pStreamInfo->bits_per_sample);
-    if(orig_pcm_size == 0)
+    if (orig_pcm_size == 0)
         printf("PCM data length: STDIN\n\n");
     else
-        printf("PCM data length: %ld\n\n", orig_pcm_size);
+        printf("PCM data length: %u\n\n", orig_pcm_size);
     fflush(stdout);
 
     PaStreamParameters outputParameters;
@@ -195,12 +226,13 @@ int ra_client(int argc, char **argv) {
 
     outputParameters.device = Pa_GetDefaultOutputDevice(); /* Get default output device */
     if (outputParameters.device == paNoDevice) {
-        fprintf(stdout,"Error: No default output device.\n");
-        exit(-1);
+        printf("Error: No default output device.\n");
+        return EXIT_FAILURE;
     }
+
     outputParameters.channelCount = pStreamInfo->channels;
     outputParameters.sampleFormat = paInt16; /* 16 bit integer output */
-    outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device) -> defaultLowOutputLatency;
+    outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
     outputParameters.hostApiSpecificStreamInfo = NULL;
 
     Pa_OpenStream(
@@ -216,7 +248,7 @@ int ra_client(int argc, char **argv) {
     OpusDecoder *decoder; /* Create a new decoder state */
     decoder = opus_decoder_create((opus_int32) pStreamInfo->sample_rate, pStreamInfo->channels, &err);
     if (err < 0) {
-        fprintf(stdout, "failed to create an decoder: %s\n", opus_strerror(err));
+        printf("Error: failed to create an decoder - %s\n", opus_strerror(err));
         return EXIT_FAILURE;
     }
 
@@ -225,11 +257,8 @@ int ra_client(int argc, char **argv) {
     fflush(stdout);
 
     pthread_t info_printer, heartbeat_sender;
-    pthread_create(&info_printer, NULL, print_info, NULL); // Activate opus timer.
-
-    struct server_socket_info *server_socket_info = (struct server_socket_info *)malloc(sizeof(struct server_socket_info));
-    server_socket_info->sock_fd = sock_fd, server_socket_info->server_addr = server_addr, server_socket_info->socket_len = socket_len;
-    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *)server_socket_info);
+    pthread_create(&info_printer, NULL, print_connection_info, NULL); // Activate opus timer.
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info);
 
     Pa_StartStream(stream);
     while (1) {
@@ -246,28 +275,29 @@ int ra_client(int argc, char **argv) {
         }
 
         int idx = 0;
-        for(int i = 0; i < sizeof(c_bits); i++) { // 'OPUS' indicates for Start of opus stream.
-            if(c_bits[i] == 'O' && c_bits[i + 1] == 'P' && c_bits[i + 2] == 'U' && c_bits[i + 3] == 'S')
-            {
+        for (int i = 0; i < sizeof(c_bits); i++) { // 'OPUS' indicates for Start of opus stream.
+            if (c_bits[i] == 'O' && c_bits[i + 1] == 'P' && c_bits[i + 2] == 'U' && c_bits[i + 3] == 'S') {
                 idx = i - 1;
                 break;
             }
         }
 
         char str_nbBytes[idx + 1];
-        for(int i = 0; i <= idx + 1; i++) {
-            if(i == (idx + 1))
+        for (int i = 0; i <= idx + 1; i++) {
+            if (i == (idx + 1))
                 str_nbBytes[i] = '\0';
             else
                 str_nbBytes[i] = (char) c_bits[i];
         }
         long nbBytes = strtol(str_nbBytes, NULL, 10);
+        chacha20_xor(&ctx, c_bits + idx + 5, MAX_PACKET_SIZE);
 
         /* Decode the frame. */
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits + idx + 5, (opus_int32) nbBytes, out,
                                      MAX_FRAME_SIZE, 0);
+        printf("\nframe_size: %d\n", frame_size);
         if (frame_size < 0) {
-            fprintf(stdout, "decoder failed: %s\n", opus_strerror(frame_size));
+            printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
             return EXIT_FAILURE;
         }
 
