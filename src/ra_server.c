@@ -41,9 +41,9 @@
 #define OPUS_FLAG "OPUS"
 
 #define FRAME_SIZE 960
-#define MAX_PACKET_SIZE (3 * 1275)
+#define MAX_PACKET_SIZE (3 * 1276)
 
-// Max opus frame size if 1275 as from RFC6716.
+// Max opus frame size if 1276 as from RFC6716.
 
 // If sample <= 20ms opus_encode return always an one frame packet.
 // If celt is used and sample is 40 or 60ms, two or three frames packet is generated as max celt frame size is 20ms.
@@ -51,7 +51,7 @@
 
 #define APPLICATION OPUS_APPLICATION_AUDIO
 
-#define EOS "EOS" // End of Stream flag.
+#define EOS "EOS" // End of Stream FLAG.
 
 struct pcm_header {
     char chunk_id[4];
@@ -145,7 +145,7 @@ int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
     server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    // Bind the socket with the server address.
+    /* Bind the socket with the server address. */
     if (bind(sock_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         fprintf(stdout, "Socket Bind Failed.\n");
         exit(EXIT_FAILURE);
@@ -169,7 +169,7 @@ int ready_sock_server_seq1(struct client_socket_info *p_client_socket_info) {
              (socklen_t *) p_client_socket_info->socket_len);
     buffer[strlen(buffer) - 1] = '\0';
 
-    //print details of the client.
+    /* print details of the client. */
     printf("Connection from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
     fflush(stdout);
 
@@ -228,7 +228,7 @@ bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_
 
 bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
-    const int crypto_payload_size = crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES;
+    const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
 
     if (crypto_payload_size ==
         sendto(p_client_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, (struct sockaddr *) &client_addr,
@@ -242,21 +242,20 @@ bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_
 }
 
 int is_20ms = false;
-
 void *provide_20ms_opus_timer() {
     while (1) {
         if (is_20ms == -1)
             break;
 
         if (!is_20ms) {
-            usleep(19925);
+            usleep(19895); // It's not 20ms but it may provide 20ms frames.
             is_20ms = true;
         }
     }
 }
 
 void
-provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes, unsigned char *crypto_payload,
+provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes,
                          struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
@@ -265,10 +264,6 @@ provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes, unsigned char *cryp
 
     sprintf(buffer, "%d", nbBytes);
     strncat(buffer, OPUS_FLAG, sizeof(OPUS_FLAG));
-
-    struct chacha20_context ctx;
-    chacha20_init_context(&ctx, crypto_payload, crypto_payload + crypto_stream_chacha20_NONCEBYTES, 0);
-    chacha20_xor(&ctx, c_bits, MAX_PACKET_SIZE);
 
     memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, MAX_PACKET_SIZE);
 
@@ -378,7 +373,7 @@ int ra_server(int argc, char **argv) {
     client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
 
     unsigned char *crypto_payload = generate_random_bytestream(
-            crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES);
+            CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
 
     if ((socket_len = ready_sock_server_seq1(client_socket_info))) {
         alarm(5); // Start time-out timer.
@@ -401,13 +396,13 @@ int ra_server(int argc, char **argv) {
                            : "\nStarted Sending Opus Packets...\n");
     fflush(stdout);
 
+    OpusEncoder *encoder;
     opus_int16 in[FRAME_SIZE * pcm_struct->pcmFmtChunk.channels];
     unsigned char c_bits[MAX_PACKET_SIZE];
-
-    OpusEncoder *encoder;
+    struct chacha20_context ctx;
     int err;
 
-    /*Create a new encoder state */
+    /* Create a new encoder state */
     encoder = opus_encoder_create((opus_int32) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
                                   APPLICATION,
                                   &err);
@@ -432,8 +427,8 @@ int ra_server(int argc, char **argv) {
     }
 
     pthread_t opus_timer, heartbeat_receiver;
-    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus timer.
-    pthread_create(&heartbeat_receiver, NULL, recv_heartbeat, &sock_fd);
+    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus_20ms timer.
+    pthread_create(&heartbeat_receiver, NULL, recv_heartbeat, &sock_fd); // Activate heartbeat receiver.
 
     int nbBytes;
     while (1) {
@@ -456,10 +451,14 @@ int ra_server(int argc, char **argv) {
             return EXIT_FAILURE;
         }
 
-        // Send encoded PCM data.
-        provide_20ms_opus_stream(c_bits, nbBytes, crypto_payload, client_socket_info);
+        /* Encrypt the frame. */
+        chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
+        chacha20_xor(&ctx, c_bits, MAX_PACKET_SIZE);
+
+        /* Send encoded PCM data. */
+        provide_20ms_opus_stream(c_bits, nbBytes, client_socket_info);
     }
-    // Send EOS Packet.
+    /* Send EOS Packet. */
     sendto(sock_fd, EOS, strlen(EOS), 0, (struct sockaddr *) &client_addr, socket_len);
     is_20ms = -1;
 
