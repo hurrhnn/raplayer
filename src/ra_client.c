@@ -40,13 +40,13 @@
 #define OPUS_FLAG "OPUS"
 
 #define MAX_FRAME_SIZE (6 * 960)
-#define MAX_PACKET_SIZE (3 * 1275)
+#define MAX_PACKET_SIZE (3 * 1276)
 
-// Max opus frame size if 1275 as from RFC6716.
+// Max opus frame size if 1276 as from RFC6716.
 
 // If sample <= 20ms opus_encode return always an one frame packet.
-// If celt is used and sample is 40 or 60ms, two or three frames packet is generated as max celt frame size is 20ms
-// in this very specific case, the max packet size is multiplied by 2 or 3 respectively
+// If celt is used and sample is 40 or 60ms, two or three frames packet is generated as max celt frame size is 20ms.
+// in this very specific case, the max packet size is multiplied by 2 or 3 respectively.
 
 struct stream_info {
     int16_t channels;
@@ -134,7 +134,7 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_so
 
 unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket_info) {
     struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
-    const int crypto_payload_size = crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES;
+    const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
     unsigned char *crypto_payload = calloc(crypto_payload_size, BYTE);
 
     if (crypto_payload_size ==
@@ -197,7 +197,7 @@ int ra_client(int argc, char **argv) {
     else
         port = (int) strtol(argv[3], NULL, 10);
 
-    alarm(2); // Start time out timer.
+    alarm(2); // Starting time out alerm.
     int sock_fd = client_init_socket(argv[2], port,
                                      (struct sockaddr_in *) &server_addr), socket_len = sizeof(server_addr);
 
@@ -208,7 +208,6 @@ int ra_client(int argc, char **argv) {
 
     struct chacha20_context ctx;
     unsigned char *crypto_payload = ready_sock_client_seq2(server_socket_info);
-    chacha20_init_context(&ctx, crypto_payload, crypto_payload + crypto_stream_chacha20_NONCEBYTES, 0);
 
     printf("Received audio info: \n");
     printf("Channels: %hd\n", pStreamInfo->channels);
@@ -257,12 +256,12 @@ int ra_client(int argc, char **argv) {
     fflush(stdout);
 
     pthread_t info_printer, heartbeat_sender;
-    pthread_create(&info_printer, NULL, print_connection_info, NULL); // Activate opus timer.
-    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info);
+    pthread_create(&info_printer, NULL, print_connection_info, NULL); // Activate info printer.
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info); // Activate heartbeat sender.
 
     Pa_StartStream(stream);
     while (1) {
-        alarm(2);
+        alarm(2); // reset alerm every 2 seconds.
         unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE];
 
         opus_int16 out[MAX_FRAME_SIZE * pStreamInfo->channels];
@@ -274,6 +273,7 @@ int ra_client(int argc, char **argv) {
             break;
         }
 
+        // Calculate opus frame offset.
         int idx = 0;
         for (int i = 0; i < sizeof(c_bits); i++) { // 'OPUS' indicates for Start of opus stream.
             if (c_bits[i] == 'O' && c_bits[i + 1] == 'P' && c_bits[i + 2] == 'U' && c_bits[i + 3] == 'S') {
@@ -290,12 +290,14 @@ int ra_client(int argc, char **argv) {
                 str_nbBytes[i] = (char) c_bits[i];
         }
         long nbBytes = strtol(str_nbBytes, NULL, 10);
+
+        /* Decrypt the frame. */
+        chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
         chacha20_xor(&ctx, c_bits + idx + 5, MAX_PACKET_SIZE);
 
         /* Decode the frame. */
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits + idx + 5, (opus_int32) nbBytes, out,
                                      MAX_FRAME_SIZE, 0);
-        printf("\nframe_size: %d\n", frame_size);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
             return EXIT_FAILURE;
