@@ -5,7 +5,7 @@ The raplayer is a C-based cross-platfrom remote audio player.<br> It can play si
 
 ### Coverage
 ```
-Windows: cygwin environment only tested, MSVC NOT supported yet.
+Windows: Cygwin environment only tested, MSVC and MinGW does NOT supported yet.
 Linux: supported.
 MacOS: supported.
 ```
@@ -14,7 +14,7 @@ MacOS: supported.
 
 #### You must pre-install the corresponding package for each OS.
 
-Windows: `cmake make gcc`<br>
+Windows: `cmake make gcc-core`<br>
 Linux: `alsa-lib-development-package(debian: libasound-dev, RHEL: alsa-lib-devel) cmake make gcc`<br>
 MacOS: `cmake make gcc`<br>
 
@@ -85,8 +85,9 @@ ffmpeg -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s
 ```
 ## Known issues
 
- - When building a source from MacOSX to a build script, it is not built at once (must be done two times).
- - When running in pipe mode from server mode, pcm data length is not displayed as "STDIN" when connecting clients in some environments.
+ - **Server mode in raplayer does not work in Windows and MacOS environments.**
+ - ~~When building a source from MacOS to a build script, it is not built at once (must be done two times).~~ - Fixed.
+ - ~~When running in pipe mode from server mode, pcm data length is not displayed as "STDIN" when connecting clients in some environments.~~ - Fixed.
 
 ## License
 
