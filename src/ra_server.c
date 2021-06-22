@@ -27,15 +27,17 @@
 #include <math.h>
 #include <errno.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <opus/opus.h>
-#include <fcntl.h>
+#include "chacha20/chacha20.h"
 
 #define BYTE 1
 #define WORD 2
 #define DWORD 4
 
+#define OK "OK"
 #define OPUS_FLAG "OPUS"
 
 #define FRAME_SIZE 960
@@ -53,26 +55,26 @@
 
 struct pcm_header {
     char chunk_id[4];
-    long chunk_size;
+    uint32_t chunk_size;
     char format[4];
 };
 
 struct pcm_fmt_chunk {
     char chunk_id[4];
-    long chunk_size;
+    uint32_t chunk_size;
 
-    short audio_format;
-    short channels;
-    long sample_rate;
-    long byte_rate;
+    uint16_t audio_format;
+    uint16_t channels;
+    uint32_t sample_rate;
+    uint32_t byte_rate;
 
-    short block_align;
-    short bits_per_sample;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
 };
 
 struct pcm_data_chunk {
     char chunk_id[4];
-    long chunk_size;
+    uint32_t chunk_size;
     char *data;
 };
 
@@ -122,7 +124,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fgetpos(fin, before_data_pos); // Save begin of pcm data position.
 
     long pcm_data_size = pPcm->pcmDataChunk.chunk_size;
-    pPcm->pcmDataChunk.data = (char *) malloc(sizeof(char) * pcm_data_size);
+    pPcm->pcmDataChunk.data = malloc(BYTE * pcm_data_size);
     fread(pPcm->pcmDataChunk.data, pcm_data_size, 1, fin);
 }
 
@@ -153,14 +155,18 @@ int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
 }
 
 void server_init_sock_buffer(char *buffer, int size) {
-    buffer = realloc(malloc(size), size);
+    buffer = realloc(buffer, size);
     memset(buffer, 0, size);
 }
 
-int ready_sock_server_seq1(char *buffer, int buffer_size, struct client_socket_info *p_client_socket_info) {
+int ready_sock_server_seq1(struct client_socket_info *p_client_socket_info) {
 
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
-    recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr, (socklen_t *) p_client_socket_info->socket_len);
+    int buffer_size = 6;
+    char *buffer = calloc(buffer_size, BYTE);
+
+    recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
+             (socklen_t *) p_client_socket_info->socket_len);
     buffer[strlen(buffer) - 1] = '\0';
 
     //print details of the client.
@@ -174,7 +180,7 @@ int ready_sock_server_seq1(char *buffer, int buffer_size, struct client_socket_i
         return 0;
 }
 
-bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct client_socket_info *p_client_socket_info) {
+bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
     int stream_info_size = DWORD + WORD * 2, buffer_size = 5;
@@ -183,14 +189,14 @@ bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct client_so
     memcpy((stream_info + WORD), &pcm_struct.pcmFmtChunk.sample_rate, DWORD);
     memcpy((stream_info + WORD + DWORD), &pcm_struct.pcmFmtChunk.bits_per_sample, WORD);
 
-    char *buffer = (char *) calloc(buffer_size, sizeof(char));
+    char *buffer = calloc(buffer_size, BYTE);
 
     sprintf(buffer, "%d", stream_info_size);
-    sendto(sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
+    sendto(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
            (socklen_t) *p_client_socket_info->socket_len);
     server_init_sock_buffer(buffer, buffer_size);
 
-    recvfrom(sock_fd, buffer, buffer_size, 0, NULL, NULL);
+    recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL);
     if (strcmp(buffer, "OK") != 0) {
         fflush(stdout);
         return 0;
@@ -200,18 +206,19 @@ bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct client_so
     server_init_sock_buffer(buffer, buffer_size);
 
     if (stream_info_size ==
-        sendto(sock_fd, stream_info, stream_info_size, 0,
+        sendto(p_client_socket_info->sock_fd, stream_info, stream_info_size, 0,
                (struct sockaddr *) &client_addr, (socklen_t) *p_client_socket_info->socket_len)) {
-        if (recvfrom(sock_fd, buffer, buffer_size, 0, NULL, NULL) &&
+        if (recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL) &&
             stream_info_size == strtol(buffer, NULL, 10)) {
 
             buffer_size = DWORD;
             server_init_sock_buffer(buffer, buffer_size);
 
-            sendto(sock_fd, &pcm_struct.pcmDataChunk.chunk_size, DWORD, 0, (struct sockaddr *) &client_addr,
+            sendto(p_client_socket_info->sock_fd, &pcm_struct.pcmDataChunk.chunk_size, DWORD, 0,
+                   (struct sockaddr *) &client_addr,
                    (socklen_t) *p_client_socket_info->socket_len);
 
-            recvfrom(sock_fd, buffer, DWORD, 0, NULL, NULL);
+            recvfrom(p_client_socket_info->sock_fd, buffer, DWORD, 0, NULL, NULL);
             if (strcmp(buffer, "OK") == 0)
                 return true;
         }
@@ -219,7 +226,23 @@ bool ready_sock_server_seq2(int sock_fd, struct pcm pcm_struct, struct client_so
     return false;
 }
 
+bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_info *p_client_socket_info) {
+    struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
+    const int crypto_payload_size = crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES;
+
+    if (crypto_payload_size ==
+        sendto(p_client_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, (struct sockaddr *) &client_addr,
+               (socklen_t) *p_client_socket_info->socket_len)) {
+        unsigned char *buffer = malloc(sizeof(OK));
+        recvfrom(p_client_socket_info->sock_fd, buffer, sizeof(OK), 0, NULL, NULL);
+        if (!strcmp((const char *) buffer, OK))
+            return true;
+    }
+    return false;
+}
+
 int is_20ms = false;
+
 void *provide_20ms_opus_timer() {
     while (1) {
         if (is_20ms == -1)
@@ -233,7 +256,8 @@ void *provide_20ms_opus_timer() {
 }
 
 void
-provide_20ms_opus_stream(char *c_bits, int nbBytes, struct client_socket_info *p_client_socket_info) {
+provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes, unsigned char *crypto_payload,
+                         struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
     const int nbBytes_len = floor(log10(nbBytes) + 1);
@@ -241,6 +265,10 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, struct client_socket_info *p
 
     sprintf(buffer, "%d", nbBytes);
     strncat(buffer, OPUS_FLAG, sizeof(OPUS_FLAG));
+
+    struct chacha20_context ctx;
+    chacha20_init_context(&ctx, crypto_payload, crypto_payload + crypto_stream_chacha20_NONCEBYTES, 0);
+    chacha20_xor(&ctx, c_bits, MAX_PACKET_SIZE);
 
     memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, MAX_PACKET_SIZE);
 
@@ -253,6 +281,7 @@ provide_20ms_opus_stream(char *c_bits, int nbBytes, struct client_socket_info *p
             break;
         }
     }
+    free(buffer);
 }
 
 void server_signal_timer(int signal) {
@@ -260,8 +289,7 @@ void server_signal_timer(int signal) {
     exit(signal);
 }
 
-_Noreturn void *recv_heartbeat(void *p_sock_fd)
-{
+_Noreturn void *recv_heartbeat(void *p_sock_fd) {
     int sock_fd = *(int *) p_sock_fd;
     char buffer[2];
 
@@ -323,7 +351,7 @@ int ra_server(int argc, char **argv) {
     fin = (pipe_mode ? stdin : fopen(fin_name, "rb"));
 
     if (fin == NULL) {
-        fprintf(stdout, "Failed to open input file: %s\n", strerror(errno));
+        fprintf(stdout, "Error: Failed to open input file: %s\n", strerror(errno));
         return EXIT_FAILURE;
     }
 
@@ -333,34 +361,41 @@ int ra_server(int argc, char **argv) {
 
     printf("\nFile %s info: \n", fin_name);
     printf("Channels: %hd\n", pcm_struct->pcmFmtChunk.channels);
-    printf("Sample rate: %ld\n", pcm_struct->pcmFmtChunk.sample_rate);
+    printf("Sample rate: %u\n", pcm_struct->pcmFmtChunk.sample_rate);
     printf("Bit per sample: %hd\n", pcm_struct->pcmFmtChunk.bits_per_sample);
     if (pipe_mode)
         printf("PCM data length: STDIN\n\n");
     else
-        printf("PCM data length: %ld\n\n", pcm_struct->pcmDataChunk.chunk_size);
+        printf("PCM data length: %u\n\n", pcm_struct->pcmDataChunk.chunk_size);
 
     printf("Waiting for Client... ");
     fflush(stdout);
 
     struct sockaddr_in server_addr, client_addr;
-    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(client_addr), buffer_size = 6;
-    char *buffer = (char *) calloc(buffer_size, sizeof(char));
+    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(client_addr);
 
-    struct client_socket_info *client_socket_info = (struct client_socket_info *)malloc(sizeof(struct client_socket_info));
+    struct client_socket_info *client_socket_info = malloc(sizeof(struct client_socket_info));
     client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
 
-    if ((socket_len = ready_sock_server_seq1(buffer, buffer_size, client_socket_info))) {
+    unsigned char *crypto_payload = generate_random_bytestream(
+            crypto_stream_chacha20_NONCEBYTES + crypto_stream_chacha20_KEYBYTES);
+
+    if ((socket_len = ready_sock_server_seq1(client_socket_info))) {
         alarm(5); // Start time-out timer.
-        if (ready_sock_server_seq2(sock_fd, *pcm_struct, client_socket_info))
-            printf("Preparing socket sequence has been Successfully Completed.");
-        else {
-            fprintf(stdout, "A server socket preparation sequence Failed.\n");
-            exit(EXIT_FAILURE);
+        if (ready_sock_server_seq2(*pcm_struct, client_socket_info)) {
+            if (ready_sock_server_seq3(crypto_payload, client_socket_info))
+                printf("Preparing socket sequence has been Successfully Completed.");
+            else {
+                printf("Error: A crypto preparation sequence Failed.\n");
+                return EXIT_FAILURE;
+            }
+        } else {
+            printf("Error: A server socket preparation sequence Failed.\n");
+            return EXIT_FAILURE;
         }
     } else {
-        fprintf(stdout, "A client socket preparation sequence Failed.\n");
-        exit(EXIT_FAILURE);
+        printf("Error: A client socket preparation sequence Failed.\n");
+        return EXIT_FAILURE;
     }
     printf("%s", pipe_mode ? "\n\nStarted Sending Opus Packets... Press any key to stop audio streaming.\n"
                            : "\nStarted Sending Opus Packets...\n");
@@ -422,7 +457,7 @@ int ra_server(int argc, char **argv) {
         }
 
         // Send encoded PCM data.
-        provide_20ms_opus_stream((char *) c_bits, nbBytes, client_socket_info);
+        provide_20ms_opus_stream(c_bits, nbBytes, crypto_payload, client_socket_info);
     }
     // Send EOS Packet.
     sendto(sock_fd, EOS, strlen(EOS), 0, (struct sockaddr *) &client_addr, socket_len);
