@@ -41,14 +41,6 @@
 #define OPUS_FLAG "OPUS"
 
 #define FRAME_SIZE 960
-#define MAX_PACKET_SIZE (3 * 1276)
-
-// Max opus frame size if 1276 as from RFC6716.
-
-// If sample <= 20ms opus_encode return always an one frame packet.
-// If celt is used and sample is 40 or 60ms, two or three frames packet is generated as max celt frame size is 20ms.
-// in this very specific case, the max packet size is multiplied by 2 or 3 respectively.
-
 #define APPLICATION OPUS_APPLICATION_AUDIO
 
 #define EOS "EOS" // End of Stream FLAG.
@@ -260,16 +252,16 @@ provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes,
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
     const int nbBytes_len = floor(log10(nbBytes) + 1);
-    char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, WORD);
+    char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, WORD);
 
     sprintf(buffer, "%d", nbBytes);
     strncat(buffer, OPUS_FLAG, sizeof(OPUS_FLAG));
 
-    memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, MAX_PACKET_SIZE);
+    memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, nbBytes);
 
     while (true) {
         if (is_20ms) {
-            sendto(p_client_socket_info->sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE, 0,
+            sendto(p_client_socket_info->sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, 0,
                    (const struct sockaddr *) &client_addr,
                    (socklen_t) *p_client_socket_info->socket_len); // Send opus stream.
             is_20ms = false;
@@ -398,7 +390,7 @@ int ra_server(int argc, char **argv) {
 
     OpusEncoder *encoder;
     opus_int16 in[FRAME_SIZE * pcm_struct->pcmFmtChunk.channels];
-    unsigned char c_bits[MAX_PACKET_SIZE];
+    unsigned char c_bits[FRAME_SIZE];
     struct chacha20_context ctx;
     int err;
 
@@ -440,12 +432,12 @@ int ra_server(int argc, char **argv) {
             break;
 
         /* Convert from little-endian ordering. */
-        for (int i = 0; i < WORD * pcm_struct->pcmFmtChunk.channels * FRAME_SIZE; i++)
+        for (int i = 0; i < pcm_struct->pcmFmtChunk.channels * FRAME_SIZE; i++)
             in[i] = (opus_int16) (pcm_bytes[2 * i + 1] << 8 | pcm_bytes[2 * i]);
 
         /* Encode the frame. */
         nbBytes = opus_encode(encoder, in, FRAME_SIZE, c_bits,
-                              MAX_PACKET_SIZE);
+                              FRAME_SIZE);
         if (nbBytes < 0) {
             fprintf(stdout, "encode failed: %s\n", opus_strerror(nbBytes));
             return EXIT_FAILURE;
@@ -453,7 +445,7 @@ int ra_server(int argc, char **argv) {
 
         /* Encrypt the frame. */
         chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
-        chacha20_xor(&ctx, c_bits, MAX_PACKET_SIZE);
+        chacha20_xor(&ctx, c_bits, nbBytes);
 
         /* Send encoded PCM data. */
         provide_20ms_opus_stream(c_bits, nbBytes, client_socket_info);
