@@ -18,6 +18,20 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <math.h>
+#include <errno.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <opus/opus.h>
+
 #ifndef RAPLAYER_RA_SERVER_H
 #define RAPLAYER_RA_SERVER_H
 

@@ -18,41 +18,32 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <portaudio.h>
-
 #include "ra_client.h"
 #include "ra_server.h"
 
-void print_usage(int argc, char **argv) {
-    if (argc < 2 || (strcmp(argv[1], "help") == 0)) {
-        puts("");
-        printf("Usage: %s <Running Mode>\n\n", argv[0]);
-        puts("--client: Running on client mode.");
-        puts("--server: Running on server mode.");
-        puts("");
-        exit(EXIT_SUCCESS);
-    }
+void print_usage(char **argv) {
+    puts("");
+    printf("Usage: %s <Running Mode>\n\n", argv[0]);
+    puts("--client: Running on client mode.");
+    puts("--server: Running on server mode.");
+    puts("");
 }
 
 int main(int argc, char **argv) {
     fclose(stderr); // Close stderr to avoid showing logging in the alsa-lib.
     int err = Pa_Initialize();
 
-    if(err != paNoError) {
+    if (err != paNoError) {
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return EXIT_FAILURE;
     }
 
-    print_usage(argc, argv);
-    if(!strcmp(argv[1], "--client"))
+    if (argc < 2 || !strcmp(argv[1], "--client") ? false : !strcmp(argv[1], "--server") ? false : true)
+        print_usage(argv);
+    else if (!strcmp(argv[1], "--client"))
         ra_client(argc, argv);
-    else if(!strcmp(argv[1], "--server"))
+    else if (!strcmp(argv[1], "--server"))
         ra_server(argc, argv);
-    else
-        print_usage(argc, argv);
 
     return EXIT_SUCCESS;
 }
