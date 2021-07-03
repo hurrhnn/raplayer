@@ -358,8 +358,8 @@ int ra_server(int argc, char **argv) {
     printf("Waiting for Client... ");
     fflush(stdout);
 
-    struct sockaddr_in server_addr, client_addr;
-    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(client_addr);
+    struct sockaddr_in server_addr;
+    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(struct sockaddr_in);
 
     struct client_socket_info *client_socket_info = malloc(sizeof(struct client_socket_info));
     client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
@@ -451,7 +451,8 @@ int ra_server(int argc, char **argv) {
         provide_20ms_opus_stream(c_bits, nbBytes, client_socket_info);
     }
     /* Send EOS Packet. */
-    sendto(sock_fd, EOS, strlen(EOS), 0, (struct sockaddr *) &client_addr, socket_len);
+    sendto(client_socket_info->sock_fd, EOS, strlen(EOS), 0, (const struct sockaddr *) &*client_socket_info->client_addr,
+            (socklen_t) *client_socket_info->socket_len);
     is_20ms = -1;
 
     /* Destroy the encoder state */
