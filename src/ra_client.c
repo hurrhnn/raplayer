@@ -39,14 +39,7 @@
 
 #define OPUS_FLAG "OPUS"
 
-#define MAX_FRAME_SIZE (6 * 960)
-#define MAX_PACKET_SIZE (3 * 1276)
-
-// Max opus frame size if 1276 as from RFC6716.
-
-// If sample <= 20ms opus_encode return always an one frame packet.
-// If celt is used and sample is 40 or 60ms, two or three frames packet is generated as max celt frame size is 20ms.
-// in this very specific case, the max packet size is multiplied by 2 or 3 respectively.
+#define FRAME_SIZE 960
 
 struct stream_info {
     int16_t channels;
@@ -262,10 +255,10 @@ int ra_client(int argc, char **argv) {
     Pa_StartStream(stream);
     while (1) {
         alarm(2); // reset alerm every 2 seconds.
-        unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + MAX_PACKET_SIZE];
+        unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + FRAME_SIZE];
 
-        opus_int16 out[MAX_FRAME_SIZE * pStreamInfo->channels];
-        unsigned char pcm_bytes[MAX_FRAME_SIZE * pStreamInfo->channels * WORD];
+        opus_int16 out[FRAME_SIZE * pStreamInfo->channels];
+        unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo->channels * WORD];
 
         recvfrom(sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
         if (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') { // Detect End of Stream.
@@ -293,11 +286,11 @@ int ra_client(int argc, char **argv) {
 
         /* Decrypt the frame. */
         chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
-        chacha20_xor(&ctx, c_bits + idx + 5, MAX_PACKET_SIZE);
+        chacha20_xor(&ctx, c_bits + idx + 5, nbBytes);
 
         /* Decode the frame. */
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits + idx + 5, (opus_int32) nbBytes, out,
-                                     MAX_FRAME_SIZE, 0);
+                                     FRAME_SIZE, 0);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
             return EXIT_FAILURE;
