@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    if (argc < 2 || !strcmp(argv[1], "--client") ? false : !strcmp(argv[1], "--server") ? false : true)
+    if (argc < 2 ? true : !strcmp(argv[1], "--client") ? false : !strcmp(argv[1], "--server") ? false : true)
         print_usage(argv);
     else if (!strcmp(argv[1], "--client"))
         ra_client(argc, argv);
