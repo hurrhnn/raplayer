@@ -134,8 +134,25 @@ void client_signal_timer(int signal) {
     exit(signal);
 }
 
-long EOS = 0, sum_frame_cnt = 0, sum_frame_size = 0;
+int getch()
+{
+    int ch;
+    struct termios old, current;
 
+    tcgetattr(0, &old);
+    current = old;
+
+    current.c_lflag &= ~ICANON;
+    current.c_lflag &= ~ECHO;
+
+    tcsetattr(0, TCSANOW, &current);
+    ch = getchar();
+    tcsetattr(0, TCSANOW, &old);
+
+    return ch;
+}
+
+long EOS = 0, sum_frame_cnt = 0, sum_frame_size = 0;
 void *print_connection_info() {
     int print_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
@@ -156,6 +173,26 @@ void *send_heartbeat(void *p_server_socket_info) {
                (struct sockaddr *) ((struct server_socket_info *) p_server_socket_info)->server_addr,
                *((struct server_socket_info *) p_server_socket_info)->socket_len);
         usleep(250000);
+    }
+    return EXIT_SUCCESS;
+}
+
+void *control_volume(void *p_volume) {
+    while (!EOS) {
+        double *volume = (double *) p_volume;
+        if (getch() == '\033') { /* if the first value is esc */
+            getch(); /* skip the '[' */
+            switch(getch()) { /* the real value */
+                case 'A':
+                    *volume = (*volume - 0.01 < 0) ? *volume : *volume - 0.01; /* Increase volume. */
+                    break;
+                case 'B':
+                    *volume = (*volume + 0.01 > 1) ? *volume : *volume + 0.01; /* Decrease volume. */
+                    break;
+                default:
+                    break;
+            }
+        }
     }
     return EXIT_SUCCESS;
 }
@@ -239,9 +276,12 @@ int ra_client(int argc, char **argv) {
     printf("\nStarted Playing Opus Packets...\n");
     fflush(stdout);
 
-    pthread_t info_printer, heartbeat_sender;
+    pthread_t info_printer, heartbeat_sender, volume_controller;
     pthread_create(&info_printer, NULL, print_connection_info, NULL); // Activate info printer.
     pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info); // Activate heartbeat sender.
+
+    double volume = 0.5;
+    pthread_create(&volume_controller, NULL, control_volume, (void *) &volume);
 
     Pa_StartStream(stream);
     while (1) {
@@ -289,6 +329,8 @@ int ra_client(int argc, char **argv) {
 
         /* Convert to little-endian ordering. */
         for (int i = 0; i < pStreamInfo->channels * frame_size; i++) {
+            out[i] = (opus_int16) round(out[i] - (out[i] * (volume)));
+
             pcm_bytes[2 * i] = out[i] & 0xFF;
             pcm_bytes[2 * i + 1] = (out[i] >> 8) & 0xFF;
         }
