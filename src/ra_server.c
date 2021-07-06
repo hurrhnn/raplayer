@@ -64,10 +64,22 @@ struct pcm {
     struct pcm_data_chunk pcmDataChunk;
 };
 
+struct opus_builder_args {
+    struct pcm *pcm_struct;
+    FILE *fin;
+
+    OpusEncoder *encoder;
+    unsigned char *crypto_payload;
+    struct client_socket_info *p_client_socket_info;
+};
+
 struct client_socket_info {
     int sock_fd;
     struct sockaddr_in *client_addr;
     int *socket_len;
+
+    unsigned char *buffer;
+    unsigned int buffer_len;
 };
 
 void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
@@ -104,7 +116,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fgetpos(fin, before_data_pos); // Save begin of pcm data position.
 
     long pcm_data_size = pPcm->pcmDataChunk.chunk_size;
-    pPcm->pcmDataChunk.data = malloc(BYTE * pcm_data_size);
+    pPcm->pcmDataChunk.data = malloc(pcm_data_size);
     fread(pPcm->pcmDataChunk.data, pcm_data_size, 1, fin);
 }
 
@@ -221,42 +233,85 @@ bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_
     return false;
 }
 
-int is_20ms = false;
-void *provide_20ms_opus_timer() {
-    while (1) {
-        if (is_20ms == -1)
-            break;
+bool is_EOS = false;
 
-        if (!is_20ms) {
-            usleep(19895); // It's not 20ms but it may provide 20ms frames.
-            is_20ms = true;
-        }
+pthread_mutex_t opus_builder_mutex = PTHREAD_MUTEX_INITIALIZER, opus_sender_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t opus_builder_cond = PTHREAD_COND_INITIALIZER, opus_sender_cond = PTHREAD_COND_INITIALIZER;
+
+void *provide_20ms_opus_timer() {
+    while (!is_EOS) {
+        usleep(19900); // It's not 20ms but it may provide 20ms frames.
+        pthread_cond_signal(&opus_builder_cond);
     }
 }
 
-void
-provide_20ms_opus_stream(unsigned char *c_bits, int nbBytes,
-                         struct client_socket_info *p_client_socket_info) {
-    struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
+void *provide_20ms_opus_builder(void *p_opus_builder_args) {
+    struct opus_builder_args *opus_builder_args = (struct opus_builder_args *) p_opus_builder_args;
 
-    const int nbBytes_len = floor(log10(nbBytes) + 1);
-    char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, WORD);
+    opus_int16 in[FRAME_SIZE * opus_builder_args->pcm_struct->pcmFmtChunk.channels];
+    unsigned char c_bits[FRAME_SIZE];
+    struct chacha20_context ctx;
 
-    sprintf(buffer, "%d", nbBytes);
-    strncat(buffer, OPUS_FLAG, sizeof(OPUS_FLAG));
+    while (1) {
+        unsigned char pcm_bytes[FRAME_SIZE * opus_builder_args->pcm_struct->pcmFmtChunk.channels * WORD];
 
-    memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, nbBytes);
-
-    while (true) {
-        if (is_20ms) {
-            sendto(p_client_socket_info->sock_fd, buffer, nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, 0,
-                   (const struct sockaddr *) &client_addr,
-                   (socklen_t) *p_client_socket_info->socket_len); // Send opus stream.
-            is_20ms = false;
+        /* Read a 16 bits/sample audio frame. */
+        fread(pcm_bytes, WORD * opus_builder_args->pcm_struct->pcmFmtChunk.channels, FRAME_SIZE,
+              opus_builder_args->fin);
+        if (feof(opus_builder_args->fin)) // End Of Stream.
             break;
+
+        /* Convert from little-endian ordering. */
+        for (int i = 0; i < opus_builder_args->pcm_struct->pcmFmtChunk.channels * FRAME_SIZE; i++)
+            in[i] = (opus_int16) (pcm_bytes[2 * i + 1] << 8 | pcm_bytes[2 * i]);
+
+        /* Encode the frame. */
+        int nbBytes = opus_encode(opus_builder_args->encoder, in, FRAME_SIZE, c_bits, FRAME_SIZE);
+        if (nbBytes < 0) {
+            printf("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
+            exit(EXIT_FAILURE);
         }
+
+        /* Encrypt the frame. */
+        chacha20_init_context(&ctx, opus_builder_args->crypto_payload,
+                              opus_builder_args->crypto_payload + CHACHA20_NONCEBYTES, 0);
+        chacha20_xor(&ctx, c_bits, nbBytes);
+
+        /* Create payload. */
+        const int nbBytes_len = floor(log10(nbBytes) + 1);
+        char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, WORD);
+
+        sprintf(buffer, "%d", nbBytes);
+        strncat(buffer, OPUS_FLAG, sizeof(OPUS_FLAG));
+
+        memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, nbBytes);
+
+        /* Waiting for opus timer's signal & Send audio frames. */
+        pthread_mutex_lock(&opus_builder_mutex);
+        pthread_cond_wait(&opus_builder_cond, &opus_builder_mutex);
+
+        opus_builder_args->p_client_socket_info->buffer = (unsigned char *) buffer;
+        opus_builder_args->p_client_socket_info->buffer_len = nbBytes_len + sizeof(OPUS_FLAG) + nbBytes;
+        pthread_cond_signal(&opus_sender_cond);
+
+        pthread_mutex_unlock(&opus_builder_mutex);
     }
-    free(buffer);
+    is_EOS = true;
+}
+
+void
+*provide_20ms_opus_sender(void *p_client_socket_info) {
+    struct client_socket_info *client_socket_info = (struct client_socket_info *) p_client_socket_info;
+    struct sockaddr_in client_addr = *client_socket_info->client_addr;
+
+    while (!is_EOS) {
+        pthread_mutex_lock(&opus_sender_mutex);
+        pthread_cond_wait(&opus_sender_cond, &opus_sender_mutex);
+        sendto(client_socket_info->sock_fd, client_socket_info->buffer, client_socket_info->buffer_len, 0,
+               (const struct sockaddr *) &client_addr,
+               (socklen_t) *client_socket_info->socket_len);
+        pthread_mutex_unlock(&opus_sender_mutex);
+    }
 }
 
 void server_signal_timer(int signal) {
@@ -303,8 +358,7 @@ int ra_server(int argc, char **argv) {
         port = (int) strtol(argv[4], NULL, 10);
     }
 
-    struct pcm *pcm_struct = malloc(sizeof(struct pcm));
-    memset(pcm_struct, 0, sizeof(struct pcm));
+    struct pcm *pcm_struct = calloc(sizeof(struct pcm), BYTE);
 
     char *fin_name = stream_mode ? argv[3] : argv[2];
     if (fin_name[0] == '-' && fin_name[1] != '-') {
@@ -349,14 +403,14 @@ int ra_server(int argc, char **argv) {
     struct sockaddr_in server_addr;
     int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(struct sockaddr_in);
 
-    struct client_socket_info *client_socket_info = malloc(sizeof(struct client_socket_info));
+    struct client_socket_info *client_socket_info = calloc(sizeof(struct client_socket_info), BYTE);
     client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
 
     unsigned char *crypto_payload = generate_random_bytestream(
             CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
 
     if ((socket_len = ready_sock_server_seq1(client_socket_info))) {
-        alarm(5); // Start time-out timer.
+        alarm(5); // Start timeout timer.
         if (ready_sock_server_seq2(*pcm_struct, client_socket_info)) {
             if (ready_sock_server_seq3(crypto_payload, client_socket_info))
                 printf("Preparing socket sequence has been Successfully Completed.");
@@ -372,76 +426,58 @@ int ra_server(int argc, char **argv) {
         printf("Error: A client socket preparation sequence Failed.\n");
         return EXIT_FAILURE;
     }
-    printf("%s", pipe_mode ? "\n\nStarted Sending Opus Packets... Press any key to stop audio streaming.\n"
-                           : "\nStarted Sending Opus Packets...\n");
+    printf("\n\nStarted Sending Opus Packets...\n");
     fflush(stdout);
 
-    OpusEncoder *encoder;
-    opus_int16 in[FRAME_SIZE * pcm_struct->pcmFmtChunk.channels];
-    unsigned char c_bits[FRAME_SIZE];
-    struct chacha20_context ctx;
     int err;
-
+    OpusEncoder *encoder;
     /* Create a new encoder state */
     encoder = opus_encoder_create((opus_int32) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
                                   APPLICATION,
                                   &err);
     if (err < 0) {
-        fprintf(stdout, "failed to create an encoder: %s\n", opus_strerror(err));
-        return EXIT_FAILURE;
+        printf("Error: failed to create an encoder - %s\n", opus_strerror(err));
+        exit(EXIT_FAILURE);
     }
 
     if (opus_encoder_ctl(encoder,
                          OPUS_SET_BITRATE(pcm_struct->pcmFmtChunk.sample_rate * pcm_struct->pcmFmtChunk.channels)) <
         0) {
-        fprintf(stdout, "failed to set bitrate: %s\n", opus_strerror(err));
-        return EXIT_FAILURE;
+        printf("Error: failed to set bitrate - %s\n", opus_strerror(err));
+        exit(EXIT_FAILURE);
     }
 
     if (!pipe_mode)
         fsetpos(fin, &before_data_pos); // Re-read pcm data bytes from stream.
 
     if (stream_mode) {
-        fseek(stdin, 0, SEEK_END);
+        fseek(fin, 0, SEEK_END);
         fcntl(fileno(fin), F_SETFL, fcntl(fileno(fin), F_GETFL) | O_NONBLOCK);
     }
 
-    pthread_t opus_timer, heartbeat_receiver;
-    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus_20ms timer.
+    /* Create opus builder arguments struct. */
+    struct opus_builder_args *p_opus_builder_args = calloc(sizeof(struct opus_builder_args), BYTE);
+    p_opus_builder_args->pcm_struct = pcm_struct;
+    p_opus_builder_args->fin = fin;
+    p_opus_builder_args->encoder = encoder;
+    p_opus_builder_args->crypto_payload = crypto_payload;
+    p_opus_builder_args->p_client_socket_info = client_socket_info;
+
+    pthread_t heartbeat_receiver, opus_builder, opus_sender, opus_timer;
+    pthread_create(&opus_sender, NULL, provide_20ms_opus_sender, client_socket_info); // Activate opus sender.
+    pthread_create(&opus_builder, NULL, provide_20ms_opus_builder, p_opus_builder_args); // Activate opus builder.
+    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus timer.
     pthread_create(&heartbeat_receiver, NULL, recv_heartbeat, &sock_fd); // Activate heartbeat receiver.
 
-    int nbBytes;
-    while (1) {
-        unsigned char pcm_bytes[FRAME_SIZE * pcm_struct->pcmFmtChunk.channels * WORD];
+    /* Wait for ending pthreads. */
+    pthread_join(opus_sender, NULL);
+    pthread_join(opus_builder, NULL);
+    pthread_join(opus_timer, NULL);
 
-        /* Read a 16 bits/sample audio frame. */
-        fread(pcm_bytes, WORD * pcm_struct->pcmFmtChunk.channels, FRAME_SIZE, fin);
-        if (feof(fin)) // End Of Stream.
-            break;
-
-        /* Convert from little-endian ordering. */
-        for (int i = 0; i < pcm_struct->pcmFmtChunk.channels * FRAME_SIZE; i++)
-            in[i] = (opus_int16) (pcm_bytes[2 * i + 1] << 8 | pcm_bytes[2 * i]);
-
-        /* Encode the frame. */
-        nbBytes = opus_encode(encoder, in, FRAME_SIZE, c_bits,
-                              FRAME_SIZE);
-        if (nbBytes < 0) {
-            fprintf(stdout, "encode failed: %s\n", opus_strerror(nbBytes));
-            return EXIT_FAILURE;
-        }
-
-        /* Encrypt the frame. */
-        chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
-        chacha20_xor(&ctx, c_bits, nbBytes);
-
-        /* Send encoded PCM data. */
-        provide_20ms_opus_stream(c_bits, nbBytes, client_socket_info);
-    }
     /* Send EOS Packet. */
-    sendto(client_socket_info->sock_fd, EOS, strlen(EOS), 0, (const struct sockaddr *) &*client_socket_info->client_addr,
-            (socklen_t) *client_socket_info->socket_len);
-    is_20ms = -1;
+    sendto(client_socket_info->sock_fd, EOS, strlen(EOS), 0,
+           (const struct sockaddr *) &*client_socket_info->client_addr,
+           (socklen_t) *client_socket_info->socket_len);
 
     /* Destroy the encoder state */
     opus_encoder_destroy(encoder);
