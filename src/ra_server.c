@@ -144,6 +144,7 @@ int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
     }
 
     return sock_fd;
+
 }
 
 void server_init_sock_buffer(char *buffer, int size) {
@@ -239,8 +240,14 @@ pthread_mutex_t opus_builder_mutex = PTHREAD_MUTEX_INITIALIZER, opus_sender_mute
 pthread_cond_t opus_builder_cond = PTHREAD_COND_INITIALIZER, opus_sender_cond = PTHREAD_COND_INITIALIZER;
 
 void *provide_20ms_opus_timer() {
+    struct timeval before, after;
+    gettimeofday(&after, NULL);
+
     while (!is_EOS) {
-        usleep(19900); // It's not 20ms but it may provide 20ms frames.
+        before = after;
+
+        after.tv_usec += 19900;
+        usleep(after.tv_usec - before.tv_usec);
         pthread_cond_signal(&opus_builder_cond);
     }
 }
