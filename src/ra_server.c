@@ -322,7 +322,7 @@ void
 }
 
 void server_signal_timer(int signal) {
-    puts("\nClient has been interrupted raplayer. Program now Exit.");
+    write(STDOUT_FILENO, "\nClient has been interrupted raplayer. Program now Exit.\n", 57);
     exit(signal);
 }
 
