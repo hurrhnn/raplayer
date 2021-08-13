@@ -44,8 +44,6 @@ struct server_socket_info {
     int *socket_len;
 };
 
-unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket_info);
-
 int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_server_addr) {
     struct sockaddr_in server_addr = *p_server_addr;
     int sock_fd;
@@ -61,8 +59,19 @@ int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_se
     server_addr.sin_family = AF_INET; // IPv4
     server_addr.sin_port = htons(port);
 
-    if (!inet_aton(str_server_addr, &server_addr.sin_addr)) {
-        fprintf(stdout, "Error: Convert Internet host address Failed.\n");
+    struct hostent *hostent;
+    struct in_addr **addr_list;
+
+    if ((hostent = gethostbyname(str_server_addr)) == NULL) {
+        printf("Error: Connection Cannot resolved to %s.", str_server_addr);
+        exit(EXIT_FAILURE);
+    } else {
+        addr_list = (struct in_addr **) hostent->h_addr_list;
+        strcpy(str_server_addr, inet_ntoa(*addr_list[0]));
+    }
+
+    if (!inet_pton(AF_INET, str_server_addr, &server_addr.sin_addr)) {
+        puts("Error: Convert Internet host address Failed.");
         exit(EXIT_FAILURE);
     }
 
@@ -130,40 +139,135 @@ unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket
     return NULL;
 }
 
+int EOS = -1;
+pthread_cond_t print_volume_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t print_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void client_signal_timer(int signal) {
-    exit(signal);
+    if (signal == SIGALRM) {
+        if (EOS == -1)
+            write(STDOUT_FILENO, "Error: Connection timed out.\n", 29);
+        else {
+            pthread_cond_signal(&print_volume_cond);
+            write(STDOUT_FILENO, "\nServer has been interrupted raplayer. Program now Exit.\n", 57);
+        }
+
+        exit(signal);
+    }
 }
 
-int getch()
+struct termios orig_termios;
+
+void reset_terminal_mode()
 {
-    int ch;
-    struct termios old, current;
-
-    tcgetattr(0, &old);
-    current = old;
-
-    current.c_lflag &= ~ICANON;
-    current.c_lflag &= ~ECHO;
-
-    tcsetattr(0, TCSANOW, &current);
-    ch = getchar();
-    tcsetattr(0, TCSANOW, &old);
-
-    return ch;
+    tcsetattr(0, TCSANOW, &orig_termios);
 }
 
-long EOS = 0, sum_frame_cnt = 0, sum_frame_size = 0;
-void *print_connection_info() {
-    int print_cnt = 0;
+void set_conio_terminal_mode()
+{
+    struct termios new_termios;
+
+    /* take two copies - one for now, one for later */
+    tcgetattr(0, &orig_termios);
+    memcpy(&new_termios, &orig_termios, sizeof(new_termios));
+
+    /* register cleanup handler, and set the new terminal mode */
+    atexit(reset_terminal_mode);
+    cfmakeraw(&new_termios);
+    tcsetattr(0, TCSANOW, &new_termios);
+}
+
+
+int kbhit() {
+    struct timeval timeval = {0, 0};
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(0, &fds);
+    return select(1, &fds, NULL, NULL, &timeval);
+}
+
+int getch() {
+    int result;
+    unsigned char ch;
+    if ((result = (int) read(0, &ch, sizeof(ch))) < 0) {
+        return result;
+    } else {
+        return ch;
+    }
+}
+
+struct pthread_signal_variables {
+    pthread_cond_t *cond;
+    pthread_mutex_t *mutex;
+
+    int *status;
+};
+
+void *pthread_receive_signal(void *p_pthread_signal_variables) {
+    pthread_cond_t *p_cond = ((struct pthread_signal_variables *) p_pthread_signal_variables)->cond;
+    pthread_mutex_t *p_mutex = ((struct pthread_signal_variables *) p_pthread_signal_variables)->mutex;
+    int *status = ((struct pthread_signal_variables *) p_pthread_signal_variables)->status;
+
+    while (!EOS) {
+        pthread_mutex_lock(p_mutex);
+        pthread_cond_wait(p_cond, p_mutex);
+        *status = 1;
+
+        pthread_mutex_unlock(p_mutex);
+    }
+}
+
+long sum_frame_cnt = 0, sum_frame_size = 0;
+
+void *change_symbol(void *p_symbol) {
+    int symbol_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
+    while (!EOS) {
+        *((char *) p_symbol) = symbols[symbol_cnt++ % DWORD];
+        usleep(250000);
+    }
+}
+
+void *print_info(void *p_volume) {
+    int print_volume_remain_cnt = 0, volume_status = 0;
+    double *volume = (double *) p_volume;
+    char symbol;
+
+    set_conio_terminal_mode();
+
+    struct pthread_signal_variables pthread_signal_variables;
+    pthread_signal_variables.cond = &print_volume_cond;
+    pthread_signal_variables.mutex = &print_volume_mutex;
+    pthread_signal_variables.status = &volume_status;
+
+    pthread_t pthread_signal_receiver, symbol_changer;
+    pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, (void *) &pthread_signal_variables);
+    pthread_create(&symbol_changer, NULL, change_symbol, (void *) &symbol);
     puts("");
 
     while (!EOS) {
-        printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB\r", symbols[++print_cnt % DWORD],
-               (double) (sum_frame_cnt * 20) / 1000, (double) (sum_frame_size) / 1000);
+        if (volume_status) {
+            volume_status = 0, print_volume_remain_cnt = 20;
+        }
+
+        if (print_volume_remain_cnt > 0) {
+            printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB, %d%%%*c\r", symbol,
+                   (double) (sum_frame_cnt * 20) / 1000, (double) (sum_frame_size) / 1000, (int) ((1 - *volume) * 100),
+                   6, ' ');
+            print_volume_remain_cnt--;
+        } else
+            printf("[%c] Elapsed time: %.2lfs, Received frame size: %.2lfKB%*c\r", symbol,
+                   (double) (sum_frame_cnt * 20) / 1000, (double) (sum_frame_size) / 1000, 6, ' ');
+
         fflush(stdout);
-        usleep(250000);
+        usleep(50000);
     }
+
+    pthread_cond_signal(pthread_signal_variables.cond);
+    pthread_join(pthread_signal_receiver, NULL);
+    pthread_join(symbol_changer, NULL);
+
+    puts("");
     return EXIT_SUCCESS;
 }
 
@@ -178,19 +282,24 @@ void *send_heartbeat(void *p_server_socket_info) {
 }
 
 void *control_volume(void *p_volume) {
+    double *volume = (double *) p_volume;
+
     while (!EOS) {
-        double *volume = (double *) p_volume;
-        if (getch() == '\033') { /* if the first value is esc */
-            getch(); /* skip the '[' */
-            switch(getch()) { /* the real value */
-                case 'A':
-                    *volume = (*volume - 0.01 < 0) ? *volume : *volume - 0.01; /* Increase volume. */
-                    break;
-                case 'B':
-                    *volume = (*volume + 0.01 > 1) ? *volume : *volume + 0.01; /* Decrease volume. */
-                    break;
-                default:
-                    break;
+        if (kbhit()) {
+            if (getch() == '\033') { /* if the first value is esc */
+                getch(); /* skip the '[' */
+                switch (getch()) { /* the real value */
+                    case 'A':
+                        *volume = (*volume - 0.01 < -0.01) ? *volume : *volume - 0.01; /* Increase volume. */
+                        pthread_cond_signal(&print_volume_cond);
+                        break;
+                    case 'B':
+                        *volume = (*volume + 0.01 > 1) ? *volume : *volume + 0.01; /* Decrease volume. */
+                        pthread_cond_signal(&print_volume_cond);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -218,7 +327,7 @@ int ra_client(int argc, char **argv) {
     else
         port = (int) strtol(argv[3], NULL, 10);
 
-    alarm(2); // Starting time out alerm.
+    alarm(2); // Starting time-out alarm.
     int sock_fd = client_init_socket(argv[2], port,
                                      (struct sockaddr_in *) &server_addr), socket_len = sizeof(server_addr);
 
@@ -276,23 +385,23 @@ int ra_client(int argc, char **argv) {
     printf("\nStarted Playing Opus Packets...\n");
     fflush(stdout);
 
-    pthread_t info_printer, heartbeat_sender, volume_controller;
-    pthread_create(&info_printer, NULL, print_connection_info, NULL); // Activate info printer.
-    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info); // Activate heartbeat sender.
-
+    EOS = 0;
     double volume = 0.5;
-    pthread_create(&volume_controller, NULL, control_volume, (void *) &volume);
+    pthread_t info_printer, heartbeat_sender, volume_controller;
+    pthread_create(&info_printer, NULL, print_info, (void *) &volume); // Activate info printer.
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info); // Activate heartbeat sender.
+    pthread_create(&volume_controller, NULL, control_volume, (void *) &volume); // Activate volume controller.
 
     Pa_StartStream(stream);
     while (1) {
-        alarm(2); // reset alerm every 2 seconds.
+        alarm(1); // reset alarm every second.
         unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + FRAME_SIZE];
 
         opus_int16 out[FRAME_SIZE * pStreamInfo->channels];
         unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo->channels * WORD];
 
         recvfrom(sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
-        if (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') { // Detect End of Stream.
+        if (EOS || c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') { // Detect End of Stream.
             EOS = 1;
             break;
         }
@@ -338,6 +447,10 @@ int ra_client(int argc, char **argv) {
         sum_frame_cnt++, sum_frame_size += nbBytes;
     }
     Pa_StopStream(stream);
+
+    pthread_join(info_printer, NULL);
+    pthread_join(heartbeat_sender, NULL);
+    pthread_join(volume_controller, NULL);
 
     /* Destroy the decoder state */
     opus_decoder_destroy(decoder);
