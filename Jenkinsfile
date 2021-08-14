@@ -54,22 +54,19 @@ pipeline {
 
         stage ('Test') {
             steps {
-                try {
-                    node('Linux') {
-                        Test()
-                    }
-                    node('MacOS') {
-                        Test()
-                    }
-                } finally {
-                    junit '*-tests-results.xml'
+                node('Linux') {
+                    Test()
+                }
+                node('MacOS') {
+                    Test()
                 }
             }
-            post {
-                always {
-                    discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
-                }
-            }
+        }
+    }
+    post {
+        always {
+            discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
+            junit '*-tests-results.xml'
         }
     }
 }
