@@ -24,7 +24,7 @@ void Test() {
 }
 
 pipeline {
-    agent none
+    agent any
     options {
         skipDefaultCheckout(true)   // to avoid force checkouts on every node in a first stage
         disableConcurrentBuilds()   // to avoid concurrent builds on same nodes
