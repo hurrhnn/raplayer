@@ -65,10 +65,10 @@ pipeline {
                     junit '*-tests-results.xml'
                 }
             }
-        }
-        post {
-            always {
-                discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
+            post {
+                always {
+                    discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
+                }
             }
         }
     }
