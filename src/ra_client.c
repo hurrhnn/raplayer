@@ -151,9 +151,8 @@ void client_signal_timer(int signal) {
             pthread_cond_signal(&print_volume_cond);
             write(STDOUT_FILENO, "\nServer has been interrupted raplayer. Program now Exit.\n", 57);
         }
-
-        exit(signal);
     }
+    exit(signal);
 }
 
 struct termios orig_termios;
