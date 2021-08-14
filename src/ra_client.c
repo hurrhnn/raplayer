@@ -149,7 +149,7 @@ void client_signal_timer(int signal) {
             write(STDOUT_FILENO, "Error: Connection timed out.\n", 29);
         else {
             pthread_cond_signal(&print_volume_cond);
-            write(STDOUT_FILENO, "\nServer has been interrupted raplayer. Program now Exit.\n", 57);
+            write(STDOUT_FILENO, "\nServer has been interrupted raplayer. Program now Exit.\n\r", 58);
         }
     }
     exit(signal);
@@ -157,13 +157,11 @@ void client_signal_timer(int signal) {
 
 struct termios orig_termios;
 
-void reset_terminal_mode()
-{
+void reset_terminal_mode() {
     tcsetattr(0, TCSANOW, &orig_termios);
 }
 
-void set_conio_terminal_mode()
-{
+void set_conio_terminal_mode() {
     struct termios new_termios;
 
     /* take two copies - one for now, one for later */
@@ -285,7 +283,8 @@ void *control_volume(void *p_volume) {
 
     while (!EOS) {
         if (kbhit()) {
-            if (getch() == '\033') { /* if the first value is esc */
+            int ch = getch();
+            if (ch == '\033') { /* if the first value is esc */
                 getch(); /* skip the '[' */
                 switch (getch()) { /* the real value */
                     case 'A':
@@ -299,6 +298,9 @@ void *control_volume(void *p_volume) {
                     default:
                         break;
                 }
+            } else {
+                puts("");
+                exit(SIGINT);
             }
         }
     }
