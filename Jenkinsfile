@@ -68,4 +68,9 @@ pipeline {
             }
         }
     }
+    post {
+        always {
+            discordSend description: "raplayer #" + env.BUILD_NUMBER, link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
+        }
+    }
 }
