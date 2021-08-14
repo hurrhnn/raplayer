@@ -12,8 +12,8 @@ void Clean() {
 void Build() {
     checkout scm
     dir("release") {
-        sh 'cmake .. -DCMAKE_BUILD_TYPE=Release'
-        sh 'make'
+        sh '`which cmake` .. -DCMAKE_BUILD_TYPE=Release'
+        sh '`which make`'
     }
 }
 
