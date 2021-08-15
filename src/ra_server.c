@@ -261,8 +261,12 @@ void *provide_20ms_opus_timer() {
 
     while (!is_EOS) {
         before = after;
+        #if __APPLE__
+            after.tv_usec += 13500;
+        #else
+            after.tv_usec += 19900;
+        #endif
 
-        after.tv_usec += 19900;
         timespec.tv_nsec = (after.tv_usec - before.tv_usec) * 1000;
         nanosleep(&timespec, NULL);
         pthread_cond_signal(&opus_builder_cond);
