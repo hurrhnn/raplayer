@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.1)
 project(ra_player C)
 
-set(CMAKE_C_FLAGS "-O2")
+set(CMAKE_C_FLAGS "-Wall -Wextra")
+set(CMAKE_C_FLAGS_RELEASE "-O3")
 
 add_library(opus STATIC IMPORTED)
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
