@@ -44,7 +44,7 @@ struct server_socket_info {
     int *socket_len;
 };
 
-int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_server_addr) {
+int client_init_socket(char *str_server_addr, int server_port, struct sockaddr_in *p_server_addr) {
     struct sockaddr_in server_addr = *p_server_addr;
     int sock_fd;
 
@@ -55,9 +55,8 @@ int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_se
     }
 
     memset((char *) &server_addr, 0, sizeof(server_addr));
-
     server_addr.sin_family = AF_INET; // IPv4
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons((uint16_t) server_port);
 
     struct hostent *hostent;
     struct in_addr **addr_list;
@@ -79,12 +78,7 @@ int client_init_socket(char *str_server_addr, int port, struct sockaddr_in *p_se
     return sock_fd;
 }
 
-void client_init_sock_buffer(char *buffer, int size) {
-    buffer = realloc(buffer, size);
-    memset(buffer, 0, size);
-}
-
-uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_socket_info *p_server_socket_info) {
+uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, const struct server_socket_info *p_server_socket_info) {
     struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
     const int buffer_size = 6;
     char *buffer = calloc(buffer_size, BYTE);
@@ -95,7 +89,7 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_so
     // Receive PCM info from server.
     recvfrom(p_server_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL);
     int info_len = (int) strtol(buffer, NULL, 10);
-    client_init_sock_buffer(buffer, info_len);
+    buffer = realloc(buffer, info_len);
 
     sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
            *p_server_socket_info->socket_len);
@@ -105,7 +99,7 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_so
     memcpy(&streamInfo->sample_rate, buffer + WORD, DWORD);
     memcpy(&streamInfo->bits_per_sample, buffer + WORD + DWORD, WORD);
 
-    client_init_sock_buffer(buffer, DWORD);
+    buffer = realloc(buffer, DWORD);
     sprintf(buffer, "%d", info_len);
 
     if (sendto(p_server_socket_info->sock_fd, buffer, strlen(buffer), 0, (struct sockaddr *) &server_addr,
@@ -113,22 +107,22 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, struct server_so
         memset(buffer, 0, DWORD);
         recvfrom(p_server_socket_info->sock_fd, buffer, DWORD, 0, NULL, NULL);
 
-        uint32_t *orig_pcm_size = malloc(DWORD);
-        memcpy(orig_pcm_size, buffer, DWORD);
+        uint32_t orig_pcm_size = 0;
+        memcpy(&orig_pcm_size, buffer, DWORD);
 
         sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
                *p_server_socket_info->socket_len);
         free(buffer);
-        return *orig_pcm_size;
+        return orig_pcm_size;
     }
     free(buffer);
     return 0;
 }
 
-unsigned char *ready_sock_client_seq2(struct server_socket_info *p_server_socket_info) {
+unsigned char *ready_sock_client_seq2(const struct server_socket_info *p_server_socket_info) {
     struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
-    unsigned char *crypto_payload = calloc(crypto_payload_size, BYTE);
+    static unsigned char crypto_payload[CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES];
 
     if (crypto_payload_size ==
         recvfrom(p_server_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, NULL, NULL)) {
@@ -143,7 +137,7 @@ int EOS = -1;
 pthread_cond_t print_volume_cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t print_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void client_signal_timer(int signal) {
+__attribute__((noreturn)) void client_signal_timer(int signal) {
     if (signal == SIGALRM) {
         if (EOS == -1)
             write(STDOUT_FILENO, "Error: Connection timed out.\n", 29);
@@ -169,7 +163,7 @@ void set_conio_terminal_mode() {
     memcpy(&new_termios, &orig_termios, sizeof(new_termios));
 
     /* register cleanup handler, and set the new terminal mode */
-    atexit(reset_terminal_mode);
+    atexit(&reset_terminal_mode);
     cfmakeraw(&new_termios);
     tcsetattr(0, TCSANOW, &new_termios);
 }
@@ -212,22 +206,30 @@ void *pthread_receive_signal(void *p_pthread_signal_variables) {
 
         pthread_mutex_unlock(p_mutex);
     }
+    return NULL;
 }
 
-long sum_frame_cnt = 0, sum_frame_size = 0;
+long sum_frame_cnt = 0;
+long sum_frame_size = 0;
 
 void *change_symbol(void *p_symbol) {
     int symbol_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
     while (!EOS) {
         *((char *) p_symbol) = symbols[symbol_cnt++ % DWORD];
-        usleep(250000);
+
+        struct timespec timespec;
+        timespec.tv_sec = 0;
+        timespec.tv_nsec = 250000000;
+        nanosleep(&timespec, NULL);
     }
+    return NULL;
 }
 
 void *print_info(void *p_volume) {
-    int print_volume_remain_cnt = 0, volume_status = 0;
-    double *volume = (double *) p_volume;
+    int print_volume_remain_cnt = 0;
+    int volume_status = 0;
+    const double *volume = (double *) p_volume;
     char symbol;
 
     set_conio_terminal_mode();
@@ -237,14 +239,16 @@ void *print_info(void *p_volume) {
     pthread_signal_variables.mutex = &print_volume_mutex;
     pthread_signal_variables.status = &volume_status;
 
-    pthread_t pthread_signal_receiver, symbol_changer;
+    pthread_t pthread_signal_receiver;
+    pthread_t symbol_changer;
     pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, (void *) &pthread_signal_variables);
     pthread_create(&symbol_changer, NULL, change_symbol, (void *) &symbol);
     puts("");
 
     while (!EOS) {
         if (volume_status) {
-            volume_status = 0, print_volume_remain_cnt = 20;
+            volume_status = 0;
+            print_volume_remain_cnt = 20;
         }
 
         if (print_volume_remain_cnt > 0) {
@@ -257,7 +261,10 @@ void *print_info(void *p_volume) {
                    (double) (sum_frame_cnt * 20) / 1000, (double) (sum_frame_size) / 1000, 6, ' ');
 
         fflush(stdout);
-        usleep(50000);
+        struct timespec timespec;
+        timespec.tv_sec = 0;
+        timespec.tv_nsec = 50000000;
+        nanosleep(&timespec, NULL);
     }
 
     pthread_cond_signal(pthread_signal_variables.cond);
@@ -273,7 +280,10 @@ void *send_heartbeat(void *p_server_socket_info) {
         sendto(((struct server_socket_info *) p_server_socket_info)->sock_fd, OK, sizeof(OK), 0,
                (struct sockaddr *) ((struct server_socket_info *) p_server_socket_info)->server_addr,
                *((struct server_socket_info *) p_server_socket_info)->socket_len);
-        usleep(250000);
+        struct timespec timespec;
+        timespec.tv_sec = 0;
+        timespec.tv_nsec = 250000000;
+        nanosleep(&timespec, NULL);
     }
     return EXIT_SUCCESS;
 }
@@ -308,9 +318,8 @@ void *control_volume(void *p_volume) {
 }
 
 int ra_client(int argc, char **argv) {
-    signal(SIGALRM, client_signal_timer);
-    struct stream_info *pStreamInfo = calloc(sizeof(struct stream_info), BYTE);
-
+    signal(SIGALRM, &client_signal_timer);
+    struct stream_info pStreamInfo;
     struct sockaddr_in server_addr;
     int port;
 
@@ -328,22 +337,24 @@ int ra_client(int argc, char **argv) {
     else
         port = (int) strtol(argv[3], NULL, 10);
 
-    alarm(2); // Starting time-out alarm.
-    int sock_fd = client_init_socket(argv[2], port,
-                                     (struct sockaddr_in *) &server_addr), socket_len = sizeof(server_addr);
+    alarm(2); // Start time-out alarm.
+    int sock_fd = client_init_socket(argv[2], port, &server_addr);
+    int socket_len = sizeof(server_addr);
 
-    struct server_socket_info *server_socket_info = malloc(sizeof(struct server_socket_info));
-    server_socket_info->sock_fd = sock_fd, server_socket_info->server_addr = &server_addr, server_socket_info->socket_len = &socket_len;
+    struct server_socket_info server_socket_info;
+    server_socket_info.sock_fd = sock_fd;
+    server_socket_info.server_addr = &server_addr;
+    server_socket_info.socket_len = &socket_len;
 
-    uint32_t orig_pcm_size = ready_sock_client_seq1(pStreamInfo, server_socket_info);
+    uint32_t orig_pcm_size = ready_sock_client_seq1(&pStreamInfo, &server_socket_info);
 
     struct chacha20_context ctx;
-    unsigned char *crypto_payload = ready_sock_client_seq2(server_socket_info);
+    unsigned char *crypto_payload = ready_sock_client_seq2(&server_socket_info);
 
     printf("Received audio info: \n");
-    printf("Channels: %hd\n", pStreamInfo->channels);
-    printf("Sample rate: %d\n", pStreamInfo->sample_rate);
-    printf("Bit per sample: %hd\n", pStreamInfo->bits_per_sample);
+    printf("Channels: %hd\n", pStreamInfo.channels);
+    printf("Sample rate: %d\n", pStreamInfo.sample_rate);
+    printf("Bit per sample: %hd\n", pStreamInfo.bits_per_sample);
     if (orig_pcm_size == 0)
         printf("PCM data length: STDIN\n\n");
     else
@@ -360,7 +371,7 @@ int ra_client(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    outputParameters.channelCount = pStreamInfo->channels;
+    outputParameters.channelCount = pStreamInfo.channels;
     outputParameters.sampleFormat = paInt16; /* 16 bit integer output */
     outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
     outputParameters.hostApiSpecificStreamInfo = NULL;
@@ -369,14 +380,14 @@ int ra_client(int argc, char **argv) {
             &stream,
             NULL, /* no input */
             &outputParameters,
-            (double) pStreamInfo->sample_rate,
+            (double) pStreamInfo.sample_rate,
             paFramesPerBufferUnspecified,
             paClipOff, /* we won't output out of range samples so don't bother clipping them */
             NULL, /* no callback, use blocking I/O */
             NULL);
 
     OpusDecoder *decoder; /* Create a new decoder state */
-    decoder = opus_decoder_create((opus_int32) pStreamInfo->sample_rate, pStreamInfo->channels, &err);
+    decoder = opus_decoder_create(pStreamInfo.sample_rate, pStreamInfo.channels, &err);
     if (err < 0) {
         printf("Error: failed to create an decoder - %s\n", opus_strerror(err));
         return EXIT_FAILURE;
@@ -388,9 +399,13 @@ int ra_client(int argc, char **argv) {
 
     EOS = 0;
     double volume = 0.5;
-    pthread_t info_printer, heartbeat_sender, volume_controller;
+
+    pthread_t info_printer;
+    pthread_t heartbeat_sender;
+    pthread_t volume_controller;
+
     pthread_create(&info_printer, NULL, print_info, (void *) &volume); // Activate info printer.
-    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) server_socket_info); // Activate heartbeat sender.
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) &server_socket_info); // Activate heartbeat sender.
     pthread_create(&volume_controller, NULL, control_volume, (void *) &volume); // Activate volume controller.
 
     Pa_StartStream(stream);
@@ -398,8 +413,8 @@ int ra_client(int argc, char **argv) {
         alarm(1); // reset alarm every second.
         unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + FRAME_SIZE];
 
-        opus_int16 out[FRAME_SIZE * pStreamInfo->channels];
-        unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo->channels * WORD];
+        opus_int16 out[FRAME_SIZE * pStreamInfo.channels];
+        unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo.channels * WORD];
 
         recvfrom(sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
         if (EOS || c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') { // Detect End of Stream.
@@ -416,7 +431,7 @@ int ra_client(int argc, char **argv) {
             }
         }
 
-        char str_nbBytes[idx + 1];
+        char str_nbBytes[idx + 2];
         for (int i = 0; i <= idx + 1; i++) {
             if (i == (idx + 1))
                 str_nbBytes[i] = '\0';
@@ -438,17 +453,20 @@ int ra_client(int argc, char **argv) {
         }
 
         /* Convert to little-endian ordering. */
-        for (int i = 0; i < pStreamInfo->channels * frame_size; i++) {
-            out[i] = (opus_int16) round(out[i] - (out[i] * (volume)));
+        for (int i = 0; i < pStreamInfo.channels * frame_size; i++) {
+            out[i] = (opus_int16) round(out[i] - (out[i] * volume));
 
             pcm_bytes[2 * i] = out[i] & 0xFF;
             pcm_bytes[2 * i + 1] = (out[i] >> 8) & 0xFF;
         }
         Pa_WriteStream(stream, pcm_bytes, frame_size);
-        sum_frame_cnt++, sum_frame_size += nbBytes;
+
+        sum_frame_cnt++;
+        sum_frame_size += nbBytes;
     }
     Pa_StopStream(stream);
 
+    /* Waiting for closing threads. */
     pthread_join(info_printer, NULL);
     pthread_join(heartbeat_sender, NULL);
     pthread_join(volume_controller, NULL);

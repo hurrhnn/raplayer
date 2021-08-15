@@ -82,6 +82,15 @@ struct client_socket_info {
     unsigned int buffer_len;
 };
 
+void cleanup(int argc, ...) {
+    va_list args;
+    va_start(args, argc);
+    for(int i = 0; i < argc; i++)
+        free(va_arg(args, void *));
+    va_end(args);
+
+}
+
 void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fread(pPcm->pcmHeader.chunk_id, DWORD, 1, fin);
     fread(&pPcm->pcmHeader.chunk_size, DWORD, 1, fin);
@@ -96,7 +105,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fread(&pPcm->pcmFmtChunk.block_align, WORD, 1, fin);
     fread(&pPcm->pcmFmtChunk.bits_per_sample, WORD, 1, fin);
 
-    char tmpBytes[BYTE];
+    char tmpBytes[BYTE] = {};
     while (1) {
         if (feof(fin)) { // End Of File.
             fprintf(stdout, "Error: The data chunk of the file not found.\n");
@@ -120,7 +129,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     fread(pPcm->pcmDataChunk.data, pcm_data_size, 1, fin);
 }
 
-int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
+int server_init_socket(const struct sockaddr_in *p_server_addr, int port) {
 
     struct sockaddr_in server_addr = *p_server_addr;
     int sock_fd;
@@ -134,7 +143,7 @@ int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
     memset((char *) &server_addr, 0, sizeof(server_addr));
 
     server_addr.sin_family = AF_INET; // IPv4
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons((uint16_t) port);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     /* Bind the socket with the server address. */
@@ -147,16 +156,11 @@ int server_init_socket(struct sockaddr_in *p_server_addr, int port) {
 
 }
 
-void server_init_sock_buffer(char *buffer, int size) {
-    buffer = realloc(buffer, size);
-    memset(buffer, 0, size);
-}
-
 int ready_sock_server_seq1(struct client_socket_info *p_client_socket_info) {
 
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
     int buffer_size = 6;
-    char *buffer = calloc(buffer_size, BYTE);
+    char buffer[buffer_size];
 
     recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
              (socklen_t *) p_client_socket_info->socket_len);
@@ -173,11 +177,13 @@ int ready_sock_server_seq1(struct client_socket_info *p_client_socket_info) {
         return 0;
 }
 
-bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_client_socket_info) {
+bool ready_sock_server_seq2(struct pcm pcm_struct, const struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
 
-    int stream_info_size = DWORD + WORD * 2, buffer_size = 5;
-    char *stream_info = malloc(stream_info_size);
+    int stream_info_size = DWORD + WORD * 2;
+    int buffer_size = 5;
+
+    char stream_info[stream_info_size];
     memcpy(stream_info, &pcm_struct.pcmFmtChunk.channels, WORD);
     memcpy((stream_info + WORD), &pcm_struct.pcmFmtChunk.sample_rate, DWORD);
     memcpy((stream_info + WORD + DWORD), &pcm_struct.pcmFmtChunk.bits_per_sample, WORD);
@@ -187,16 +193,17 @@ bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_
     sprintf(buffer, "%d", stream_info_size);
     sendto(p_client_socket_info->sock_fd, buffer, buffer_size, 0, (struct sockaddr *) &client_addr,
            (socklen_t) *p_client_socket_info->socket_len);
-    server_init_sock_buffer(buffer, buffer_size);
+    buffer = realloc(buffer, buffer_size);
 
     recvfrom(p_client_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL);
     if (strcmp(buffer, "OK") != 0) {
+        cleanup(1, buffer);
         fflush(stdout);
         return 0;
     }
 
     buffer_size += 5;
-    server_init_sock_buffer(buffer, buffer_size);
+    buffer = realloc(buffer, buffer_size);
 
     if (stream_info_size ==
         sendto(p_client_socket_info->sock_fd, stream_info, stream_info_size, 0,
@@ -205,7 +212,7 @@ bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_
             stream_info_size == strtol(buffer, NULL, 10)) {
 
             buffer_size = DWORD;
-            server_init_sock_buffer(buffer, buffer_size);
+            buffer = realloc(buffer, buffer_size);
 
             sendto(p_client_socket_info->sock_fd, &pcm_struct.pcmDataChunk.chunk_size, DWORD, 0,
                    (struct sockaddr *) &client_addr,
@@ -219,7 +226,8 @@ bool ready_sock_server_seq2(struct pcm pcm_struct, struct client_socket_info *p_
     return false;
 }
 
-bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_info *p_client_socket_info) {
+bool
+ready_sock_server_seq3(const unsigned char *crypto_payload, const struct client_socket_info *p_client_socket_info) {
     struct sockaddr_in client_addr = *p_client_socket_info->client_addr;
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
 
@@ -236,20 +244,30 @@ bool ready_sock_server_seq3(unsigned char *crypto_payload, struct client_socket_
 
 bool is_EOS = false;
 
-pthread_mutex_t opus_builder_mutex = PTHREAD_MUTEX_INITIALIZER, opus_sender_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t opus_builder_cond = PTHREAD_COND_INITIALIZER, opus_sender_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t opus_builder_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t opus_sender_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t opus_builder_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t opus_sender_cond = PTHREAD_COND_INITIALIZER;
 
 void *provide_20ms_opus_timer() {
-    struct timeval before, after;
+    struct timespec timespec;
+    timespec.tv_sec = 0;
+
+    struct timeval before;
+    struct timeval after;
+
     gettimeofday(&after, NULL);
 
     while (!is_EOS) {
         before = after;
 
         after.tv_usec += 19900;
-        usleep(after.tv_usec - before.tv_usec);
+        timespec.tv_nsec = (after.tv_usec - before.tv_usec) * 1000;
+        nanosleep(&timespec, NULL);
         pthread_cond_signal(&opus_builder_cond);
     }
+    return NULL;
 }
 
 void *provide_20ms_opus_builder(void *p_opus_builder_args) {
@@ -285,7 +303,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         chacha20_xor(&ctx, c_bits, nbBytes);
 
         /* Create payload. */
-        const int nbBytes_len = floor(log10(nbBytes) + 1);
+        const int nbBytes_len = (int) floor(log10(nbBytes) + 1);
         char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, WORD);
 
         sprintf(buffer, "%d", nbBytes);
@@ -304,11 +322,11 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         pthread_mutex_unlock(&opus_builder_mutex);
     }
     is_EOS = true;
+    return NULL;
 }
 
-void
-*provide_20ms_opus_sender(void *p_client_socket_info) {
-    struct client_socket_info *client_socket_info = (struct client_socket_info *) p_client_socket_info;
+void *provide_20ms_opus_sender(void *p_client_socket_info) {
+    const struct client_socket_info *client_socket_info = (struct client_socket_info *) p_client_socket_info;
     struct sockaddr_in client_addr = *client_socket_info->client_addr;
 
     while (!is_EOS) {
@@ -319,9 +337,10 @@ void
                (socklen_t) *client_socket_info->socket_len);
         pthread_mutex_unlock(&opus_sender_mutex);
     }
+    return NULL;
 }
 
-void server_signal_timer(int signal) {
+__attribute__((noreturn)) void server_signal_timer(int signal) {
     write(STDOUT_FILENO, "\nClient has been interrupted raplayer. Program now Exit.\n", 57);
     exit(signal);
 }
@@ -337,8 +356,10 @@ _Noreturn void *recv_heartbeat(void *p_sock_fd) {
 }
 
 int ra_server(int argc, char **argv) {
-    bool pipe_mode = false, stream_mode = false;
-    signal(SIGALRM, server_signal_timer);
+    signal(SIGALRM, &server_signal_timer);
+
+    bool pipe_mode = false;
+    bool stream_mode = false;
 
     if (argc < 3 || (strcmp(argv[2], "help") == 0)) {
         puts("");
@@ -379,6 +400,7 @@ int ra_server(int argc, char **argv) {
     }
 
     if (!pipe_mode && stream_mode) {
+        cleanup(1, pcm_struct);
         fprintf(stdout, "Invalid argument: --stream argument cannot run without <file> argument \"-\".\n");
         return EXIT_FAILURE;
     }
@@ -387,6 +409,7 @@ int ra_server(int argc, char **argv) {
     fin = (pipe_mode ? stdin : fopen(fin_name, "rb"));
 
     if (fin == NULL) {
+        cleanup(1, pcm_struct);
         fprintf(stdout, "Error: Failed to open input file: %s\n", strerror(errno));
         return EXIT_FAILURE;
     }
@@ -408,13 +431,15 @@ int ra_server(int argc, char **argv) {
     fflush(stdout);
 
     struct sockaddr_in server_addr;
-    int sock_fd = server_init_socket(&server_addr, port), socket_len = sizeof(struct sockaddr_in);
+    int sock_fd = server_init_socket(&server_addr, port);
+    int socket_len = sizeof(struct sockaddr_in);
 
     struct client_socket_info *client_socket_info = calloc(sizeof(struct client_socket_info), BYTE);
-    client_socket_info->sock_fd = sock_fd, client_socket_info->client_addr = &server_addr, client_socket_info->socket_len = &socket_len;
+    client_socket_info->sock_fd = sock_fd;
+    client_socket_info->client_addr = &server_addr;
+    client_socket_info->socket_len = &socket_len;
 
-    unsigned char *crypto_payload = generate_random_bytestream(
-            CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
+    unsigned char *crypto_payload = generate_random_bytestream(CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
 
     if ((socket_len = ready_sock_server_seq1(client_socket_info))) {
         alarm(5); // Start timeout timer.
@@ -422,14 +447,17 @@ int ra_server(int argc, char **argv) {
             if (ready_sock_server_seq3(crypto_payload, client_socket_info))
                 printf("Preparing socket sequence has been Successfully Completed.");
             else {
+                cleanup(2, pcm_struct, client_socket_info);
                 printf("Error: A crypto preparation sequence Failed.\n");
                 return EXIT_FAILURE;
             }
         } else {
+            cleanup(2, pcm_struct, client_socket_info);
             printf("Error: A server socket preparation sequence Failed.\n");
             return EXIT_FAILURE;
         }
     } else {
+        cleanup(2, pcm_struct, client_socket_info);
         printf("Error: A client socket preparation sequence Failed.\n");
         return EXIT_FAILURE;
     }
@@ -470,10 +498,14 @@ int ra_server(int argc, char **argv) {
     p_opus_builder_args->crypto_payload = crypto_payload;
     p_opus_builder_args->p_client_socket_info = client_socket_info;
 
-    pthread_t heartbeat_receiver, opus_builder, opus_sender, opus_timer;
+    pthread_t heartbeat_receiver;
+    pthread_t opus_builder;
+    pthread_t opus_sender;
+    pthread_t opus_timer;
+
     pthread_create(&opus_sender, NULL, provide_20ms_opus_sender, client_socket_info); // Activate opus sender.
     pthread_create(&opus_builder, NULL, provide_20ms_opus_builder, p_opus_builder_args); // Activate opus builder.
-    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, NULL); // Activate opus timer.
+    pthread_create(&opus_timer, NULL, &provide_20ms_opus_timer, NULL); // Activate opus timer.
     pthread_create(&heartbeat_receiver, NULL, recv_heartbeat, &sock_fd); // Activate heartbeat receiver.
 
     /* Wait for ending pthreads. */
@@ -483,7 +515,7 @@ int ra_server(int argc, char **argv) {
 
     /* Send EOS Packet. */
     sendto(client_socket_info->sock_fd, EOS, strlen(EOS), 0,
-           (const struct sockaddr *) &*client_socket_info->client_addr,
+           (const struct sockaddr *) client_socket_info->client_addr,
            (socklen_t) *client_socket_info->socket_len);
 
     /* Destroy the encoder state */
