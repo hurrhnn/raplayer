@@ -1,5 +1,6 @@
 # raplayer
-The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple audio files or streams.
+[![Build Status](https://jenkins.kokoseij.xyz/job/raplayer/badge/icon)](https://jenkins.kokoseij.xyz/job/raplayer/)
+<br><br>The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple audio files or streams.<br>
 
 ![image](https://user-images.githubusercontent.com/40728528/123002803-48fa3880-d3ed-11eb-9f08-17cd2816a8df.png)
 
@@ -66,30 +67,31 @@ Usage: ./raplayer --client <Server Address> [Port]
 [Port]: The port on the server to which you want to connect.
 
 ```
+**You can adjust the volume by pressing the up and down arrow keys during playback.**
 
 ### Usage examples
 
- - Play the pcm_16le file.
+- Play the pcm_16le file.
 ```bash
 ./raplayer --server s16le.pcm
 ```
 
- - Play audio file using ffmpeg.
+- Play audio file using ffmpeg.
 
 ```bash
 ffmpeg -i audio.mp3 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server -
 ```
 
- - Play audio **stream** using ffmpeg.
+- Play audio **stream** using ffmpeg.
 
 ```bash
 ffmpeg -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server --stream -
 ```
 ## Known issues
 
- - **Server mode in raplayer does not work in Windows and MacOS environments.**
- - ~~When building a source from MacOS to a build script, it is not built at once (must be done two times).~~ - Fixed.
- - ~~When running in pipe mode from server mode, pcm data length is not displayed as "STDIN" when connecting clients in some environments.~~ - Fixed.
+- ~~Server mode in raplayer does not work in Windows and MacOS environments.~~ - Fixed.
+- ~~When building a source from MacOS to a build script, it is not built at once (must be done two times).~~ - Fixed.
+- ~~When running in pipe mode from server mode, pcm data length is not displayed as "STDIN" when connecting clients in some environments.~~ - Fixed.
 
 ## License
 
