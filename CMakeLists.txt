@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 project(ra_player C)
 
-set(CMAKE_C_FLAGS "-Wall -Wextra")
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS_RELEASE "-O3")
 
 add_library(opus STATIC IMPORTED)
@@ -39,7 +39,7 @@ else ()
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio/src/portaudio/" CMakeFiles/portaudio_dir)
 endif ()
 
-add_executable(raplayer src/main.c src/ra_client.c src/ra_server.c src/ra_client.h src/ra_server.h src/chacha20/chacha20.h src/chacha20/chacha20.c)
+add_executable(raplayer src/main.c src/ra_client.c src/ra_server.c src/ra_client.h src/ra_server.h src/chacha20/chacha20.h src/chacha20/chacha20.c src/task_scheduler/task_scheduler.c src/task_scheduler/task_scheduler.h src/task_scheduler/task_queue/task/task.h src/task_dispatcher/task_dispatcher.c src/task_dispatcher/task_dispatcher.h src/task_scheduler/task_queue/task_queue.c src/task_scheduler/task_queue/task_queue.h)
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     add_dependencies(raplayer opus portaudio)
 else ()
