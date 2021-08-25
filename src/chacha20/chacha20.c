@@ -33,11 +33,11 @@ unsigned char *generate_random_bytestream(size_t num_bytes)
     return stream;
 }
 
-static uint32_t rotl_32(uint32_t x, int n) {
+uint32_t rotl_32(uint32_t x, int n) {
     return (x << n) | (x >> (32 - n));
 }
 
-static uint32_t pack_4bytes(const uint8_t *a) {
+uint32_t pack_4bytes(const uint8_t *a) {
     uint32_t res = 0;
     res |= (uint32_t) a[0] << 0 * 8;
     res |= (uint32_t) a[1] << 1 * 8;
@@ -46,7 +46,7 @@ static uint32_t pack_4bytes(const uint8_t *a) {
     return res;
 }
 
-static void chacha20_init_block(struct chacha20_context *ctx, uint8_t key[], uint8_t nonce[]) {
+void chacha20_init_block(struct chacha20_context *ctx, uint8_t key[], uint8_t nonce[]) {
     memcpy(ctx->key, key, sizeof(ctx->key));
     memcpy(ctx->nonce, nonce, sizeof(ctx->nonce));
 
@@ -71,12 +71,12 @@ static void chacha20_init_block(struct chacha20_context *ctx, uint8_t key[], uin
     memcpy(ctx->nonce, nonce, sizeof(ctx->nonce));
 }
 
-static void chacha20_block_set_counter(struct chacha20_context *ctx, uint64_t counter) {
+void chacha20_block_set_counter(struct chacha20_context *ctx, uint64_t counter) {
     ctx->state[12] = (uint32_t) counter;
     ctx->state[13] = pack_4bytes(ctx->nonce + 0 * 4) + (uint32_t) (counter >> 32);
 }
 
-static void chacha20_block_next(struct chacha20_context *ctx) {
+void chacha20_block_next(struct chacha20_context *ctx) {
     /* Mix the bytes a lot and hope that nobody finds out how to undo it. */
     for (int i = 0; i < 16; i++) ctx->key_stream[i] = ctx->state[i];
 

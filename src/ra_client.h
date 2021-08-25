@@ -36,6 +36,17 @@
 #ifndef RAPLAYER_RA_CLIENT_H
 #define RAPLAYER_RA_CLIENT_H
 
+#define BYTE 1
+#define WORD 2
+#define DWORD 4
+
+#define HELLO "HELLO"
+#define OK "OK"
+
+#define OPUS_FLAG "OPUS"
+
+#define FRAME_SIZE 960
+
 int ra_client(int argc, char **argv);
 
 #endif
