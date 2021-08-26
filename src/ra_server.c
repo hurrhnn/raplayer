@@ -251,7 +251,6 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
 
 _Noreturn void *handle_client(void *p_client_handler_args) {
     const int *current_clients_count = ((struct client_handler_info *) p_client_handler_args)->current_clients_count;
-    TaskQueue **recv_queues = ((struct client_handler_info *) p_client_handler_args)->recv_queues;
     const struct pcm *pcm_struct = ((struct client_handler_info *) p_client_handler_args)->pcm_struct;
     const unsigned char *crypto_payload = ((struct client_handler_info *) p_client_handler_args)->crypto_payload;
 
@@ -265,6 +264,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         pthread_cond_wait(complete_init_queue_cond, complete_init_queue_mutex);
         pthread_mutex_unlock(complete_init_queue_mutex);
 
+        TaskQueue **recv_queues = *((struct client_handler_info *) p_client_handler_args)->recv_queues;
         if (ready_sock_server_seq1(recv_queues[(*current_clients_count) - 1])) {
             if (ready_sock_server_seq2(recv_queues[(*current_clients_count) - 1], *pcm_struct)) {
                 if (ready_sock_server_seq3(recv_queues[(*current_clients_count) - 1], crypto_payload))
@@ -420,7 +420,7 @@ int ra_server(int argc, char **argv) {
     pthread_cond_t stream_consumer_cond = PTHREAD_COND_INITIALIZER;
 
     if (stream_mode) {
-        void **p_stream_consumer_args = malloc(sizeof(void *) * 4);
+        void **p_stream_consumer_args = calloc(sizeof(void *), DWORD);
 
         p_stream_consumer_args[0] = fin;
         p_stream_consumer_args[1] = &stop_consumer;
@@ -457,13 +457,13 @@ int ra_server(int argc, char **argv) {
 
     task_scheduler_args.sock_fd = sock_fd;
     task_scheduler_args.current_clients_count = &current_clients_count;
-    task_scheduler_args.recv_queues = valloc(sizeof(TaskQueue *));
+    task_scheduler_args.recv_queues = malloc(sizeof(TaskQueue *));
 
     task_scheduler_args.complete_init_queue_mutex = &complete_init_queue_mutex;
     task_scheduler_args.complete_init_queue_cond = &complete_init_queue_cond;
 
     client_handler_args.current_clients_count = &current_clients_count;
-    client_handler_args.recv_queues = task_scheduler_args.recv_queues;
+    client_handler_args.recv_queues = &task_scheduler_args.recv_queues;
     client_handler_args.pcm_struct = pcm_struct;
     client_handler_args.crypto_payload = crypto_payload;
 
@@ -475,7 +475,7 @@ int ra_server(int argc, char **argv) {
     client_handler_args.complete_init_mutex[1] = &complete_init_client_mutex;
     client_handler_args.complete_init_cond[1] = &complete_init_client_cond;
 
-    client_handler_args.opus_frame = calloc(sizeof(Task), BYTE);
+    client_handler_args.opus_frame = malloc(sizeof(Task));
     client_handler_args.opus_sender_mutex = &opus_sender_mutex;
     client_handler_args.opus_sender_cond = &opus_sender_cond;
 
@@ -546,7 +546,7 @@ int ra_server(int argc, char **argv) {
     for (int i = 0; i < current_clients_count; i++) {
         sendto(task_scheduler_args.sock_fd, EOS, strlen(EOS), 0,
                (const struct sockaddr *) &task_scheduler_args.recv_queues[i]->queue_info->client->client_addr,
-               task_scheduler_args.recv_queues[i]->queue_info->client->socket_len);
+                       task_scheduler_args.recv_queues[i]->queue_info->client->socket_len);
         cleanup(2, task_scheduler_args.recv_queues[i]->queue_info, task_scheduler_args.recv_queues[i]);
     }
 

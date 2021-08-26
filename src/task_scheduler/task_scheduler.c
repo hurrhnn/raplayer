@@ -22,30 +22,32 @@
 
 _Noreturn void *schedule_task(void *p_task_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
     struct task_scheduler_info *task_scheduler_args = (struct task_scheduler_info *) p_task_scheduler_args;
     int sock_fd = task_scheduler_args->sock_fd;
     int *current_clients_count = task_scheduler_args->current_clients_count;
-    TaskQueue **recv_queues = task_scheduler_args->recv_queues;
 
     while (true) {
-        Task *task = calloc(sizeof(Task), BYTE);
+        Task *task = malloc(sizeof(Task));
 
         const struct sockaddr_in *p_client_addr = malloc(sizeof(struct sockaddr));
         struct sockaddr_in client_addr = *p_client_addr;
 
-        const socklen_t *p_sock_len = calloc(sizeof(socklen_t), BYTE);
+        const socklen_t *p_sock_len = malloc(sizeof(socklen_t));
         socklen_t sock_len = *p_sock_len;
         sock_len = sizeof(client_addr);
 
-        task->buffer_len = recvfrom(sock_fd, task->buffer, MAX_DATA_SIZE, 0, (struct sockaddr *) &client_addr, &sock_len);
+        task->buffer_len = recvfrom(sock_fd, task->buffer, MAX_DATA_SIZE, 0, (struct sockaddr *) &client_addr,
+                                    &sock_len);
 
         int client_id = -1;
         for (int i = 0; i < *current_clients_count; i++) {
-            if ((strcmp(inet_ntoa(recv_queues[i]->queue_info->client->client_addr.sin_addr),
+            if ((strcmp(inet_ntoa(
+                                ((TaskQueue **) task_scheduler_args->recv_queues)[i]->queue_info->client->client_addr.sin_addr),
                         inet_ntoa(client_addr.sin_addr)) == 0) &&
-                ntohs(recv_queues[i]->queue_info->client->client_addr.sin_port) == ntohs(client_addr.sin_port)) {
+                ntohs(((TaskQueue **) task_scheduler_args->recv_queues)[i]->queue_info->client->client_addr.sin_port) ==
+                ntohs(client_addr.sin_port)) {
                 client_id = i;
                 break;
             }
@@ -58,20 +60,22 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
                    ntohs(client_addr.sin_port));
             fflush(stdout);
 
-            recv_queues = realloc(recv_queues, sizeof(TaskQueue *) * (*current_clients_count));
-            recv_queues[(*current_clients_count) - 1] = malloc(sizeof(TaskQueue));
+            (task_scheduler_args->recv_queues) = reallocarray(((TaskQueue **) task_scheduler_args->recv_queues),
+                                                              sizeof(TaskQueue *), (*current_clients_count));
+            ((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1] = malloc(sizeof(TaskQueue));
 
             Client *client = malloc(sizeof(Client));
             client->client_addr = client_addr;
             client->socket_len = sock_len;
 
-            init_queue(sock_fd, client, recv_queues[(*current_clients_count) - 1]);
-            append_task(recv_queues[(*current_clients_count) - 1], task);
+            init_queue(sock_fd, client,
+                       ((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1]);
+            append_task(((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1], task);
 
             pthread_mutex_lock(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_mutex);
             pthread_cond_signal(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_cond);
             pthread_mutex_unlock(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_mutex);
         } else
-            append_task(recv_queues[client_id], task);
+            append_task(((TaskQueue **) task_scheduler_args->recv_queues)[client_id], task);
     }
 }

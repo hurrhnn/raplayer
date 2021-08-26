@@ -35,7 +35,7 @@ struct task_scheduler_info {;
 
 struct client_handler_info {
     int *current_clients_count;
-    TaskQueue **recv_queues;
+    TaskQueue ***recv_queues;
     struct pcm *pcm_struct;
     unsigned char *crypto_payload;
 
