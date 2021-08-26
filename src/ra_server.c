@@ -50,7 +50,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
     char tmpBytes[BYTE] = {};
     while (1) {
         if (feof(fin)) { // End Of File.
-            printf("\nError: The data chunk of the file not found.\n");
+            printf("Error: The data chunk of the file not found.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -73,22 +73,26 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
 
 void *consume_until_connection(void *p_stream_consumer_args) {
     void **stream_consumer_args = p_stream_consumer_args;
+    unsigned char unused_buffer[WORD * WORD * FRAME_SIZE];
+
     while (!(*(bool *) (stream_consumer_args[1]))) {
-        unsigned char unused_buffer;
-        fread(&unused_buffer, BYTE, BYTE, stream_consumer_args[0]);
+        pthread_mutex_lock((pthread_mutex_t *) (stream_consumer_args[2]));
+        pthread_cond_wait((pthread_cond_t *) (stream_consumer_args[3]), (pthread_mutex_t *) (stream_consumer_args[2]));
+        pthread_mutex_unlock((pthread_mutex_t *) (stream_consumer_args[2]));
+
+        fread(&unused_buffer, DWORD, FRAME_SIZE, stream_consumer_args[0]);
     }
     free(stream_consumer_args);
     return NULL;
 }
 
 int server_init_socket(const struct sockaddr_in *p_server_addr, int port) {
-
     struct sockaddr_in server_addr = *p_server_addr;
     int sock_fd;
 
     // Creating socket file descriptor.
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        printf("\nError: Socket Creation Failed.\n");
+        printf("Error: Socket Creation Failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -100,7 +104,7 @@ int server_init_socket(const struct sockaddr_in *p_server_addr, int port) {
 
     /* Bind the socket with the server address. */
     if (bind(sock_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        printf("\nError: Socket Bind Failed.\n");
+        printf("Error: Socket Bind Failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -211,7 +215,6 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
 
         sprintf(buffer, "%d", nbBytes);
         strcat(buffer, OPUS_FLAG);
-
         memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, nbBytes);
 
         /* Waiting for opus timer's signal & Send audio frames. */
@@ -258,7 +261,9 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
     pthread_cond_t *complete_init_client_cond = ((struct client_handler_info *) p_client_handler_args)->complete_init_cond[1];
 
     while (true) {
+        pthread_mutex_lock(complete_init_queue_mutex);
         pthread_cond_wait(complete_init_queue_cond, complete_init_queue_mutex);
+        pthread_mutex_unlock(complete_init_queue_mutex);
 
         if (ready_sock_server_seq1(recv_queues[(*current_clients_count) - 1])) {
             if (ready_sock_server_seq2(recv_queues[(*current_clients_count) - 1], *pcm_struct)) {
@@ -273,7 +278,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
                 continue;
             }
         } else {
-            printf("Error: A client socket preparation sequence Failed.\n");
+            printf("Error: A client socket preparation sequence Failed.");
             continue;
         }
 
@@ -400,26 +405,40 @@ int ra_server(int argc, char **argv) {
     else
         printf("PCM data length: %u\n\n", pcm_struct->pcmDataChunk.chunk_size);
 
-    printf("Waiting for Client... ");
+    puts("Waiting for Client... ");
     fflush(stdout);
 
     if (!pipe_mode)
         fsetpos(fin, &before_data_pos); // Re-read pcm data bytes from stream.
 
     bool stop_consumer = false;
+
+    pthread_t opus_timer;
     pthread_t stream_consumer;
     pthread_t *p_stream_consumer = &stream_consumer;
+    pthread_mutex_t stream_consumer_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t stream_consumer_cond = PTHREAD_COND_INITIALIZER;
+
     if (stream_mode) {
-        void **p_stream_consumer_args = malloc(sizeof(void *) * 2);
+        void **p_stream_consumer_args = malloc(sizeof(void *) * 4);
+
         p_stream_consumer_args[0] = fin;
         p_stream_consumer_args[1] = &stop_consumer;
+        p_stream_consumer_args[2] = &stream_consumer_mutex;
+        p_stream_consumer_args[3] = &stream_consumer_cond;
+
+        // Activate opus timer for consuming stream.
+        pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, (void *) &stream_consumer_cond);
         pthread_create(p_stream_consumer, NULL, consume_until_connection, (void *) p_stream_consumer_args);
     } else
         p_stream_consumer = NULL;
 
     struct sockaddr_in server_addr;
     int sock_fd = server_init_socket(&server_addr, port);
-    fcntl(fileno(fin), F_SETFL, O_NONBLOCK);
+
+    //Set fd to Non-Blocking mode.
+    int flags = fcntl(fileno(fin), F_GETFL, 0);
+    fcntl(fileno(fin), F_SETFL, flags | O_NONBLOCK);
 
     int current_clients_count = 0;
     unsigned char *crypto_payload = generate_random_bytestream(CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
@@ -478,8 +497,9 @@ int ra_server(int argc, char **argv) {
     pthread_mutex_unlock(&complete_init_client_mutex);
 
     int err;
-    OpusEncoder *encoder;
+
     /* Create a new encoder state */
+    OpusEncoder *encoder;
     encoder = opus_encoder_create((opus_int32) pcm_struct->pcmFmtChunk.sample_rate, pcm_struct->pcmFmtChunk.channels,
                                   APPLICATION,
                                   &err);
@@ -496,8 +516,6 @@ int ra_server(int argc, char **argv) {
     }
 
     pthread_t opus_builder;
-    pthread_t opus_timer;
-
     /* Create opus builder arguments struct. */
     struct opus_builder_args *p_opus_builder_args = malloc(sizeof(struct opus_builder_args));
     p_opus_builder_args->pcm_struct = pcm_struct;
@@ -505,15 +523,17 @@ int ra_server(int argc, char **argv) {
     p_opus_builder_args->encoder = encoder;
     p_opus_builder_args->crypto_payload = crypto_payload;
     p_opus_builder_args->opus_frame = client_handler_args.opus_frame;
-    p_opus_builder_args->opus_builder_mutex = &opus_builder_mutex;
+    p_opus_builder_args->opus_builder_mutex = stream_mode ? &stream_consumer_mutex : &opus_builder_mutex;
     p_opus_builder_args->opus_sender_mutex = &opus_sender_mutex;
-    p_opus_builder_args->opus_builder_cond = &opus_builder_cond;
+    p_opus_builder_args->opus_builder_cond = stream_mode ? &stream_consumer_cond : &opus_builder_cond;
     p_opus_builder_args->opus_sender_cond = &opus_sender_cond;
 
     // Activate opus builder.
     pthread_create(&opus_builder, NULL, provide_20ms_opus_builder, (void *) p_opus_builder_args);
-    // Activate opus timer.
-    pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, (void *) &opus_builder_cond);
+
+    if(!stream_mode)
+        // Activate opus timer.
+        pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, (void *) &opus_builder_cond);
 
     /* Wait for joining threads. */
     pthread_join(opus_builder, NULL);
@@ -522,19 +542,19 @@ int ra_server(int argc, char **argv) {
     /* Cancel unending threads. */
     pthread_cancel(task_scheduler);
 
-    /* Send EOS Packet && Clean up. */
+    /* Send EOS Packet to clients && Clean up. */
     for (int i = 0; i < current_clients_count; i++) {
         sendto(task_scheduler_args.sock_fd, EOS, strlen(EOS), 0,
                (const struct sockaddr *) &task_scheduler_args.recv_queues[i]->queue_info->client->client_addr,
                task_scheduler_args.recv_queues[i]->queue_info->client->socket_len);
-        free(task_scheduler_args.recv_queues[i]->queue_info);
-        free(task_scheduler_args.recv_queues[i]);
+        cleanup(2, task_scheduler_args.recv_queues[i]->queue_info, task_scheduler_args.recv_queues[i]);
     }
 
     /* Destroy the encoder state */
     opus_encoder_destroy(encoder);
 
-    /* Close file stream. */
+    /* Close audio stream. */
     fclose(fin);
+
     exit(EXIT_SUCCESS);
 }
