@@ -272,7 +272,7 @@ void *print_info(void *p_volume) {
 
 void *send_heartbeat(void *p_server_socket_info) {
     while (!EOS) {
-        sendto(((struct server_socket_info *) p_server_socket_info)->sock_fd, OK, sizeof(OK), 0,
+        sendto(((struct server_socket_info *) p_server_socket_info)->sock_fd, HEARTBEAT, sizeof(HEARTBEAT), 0,
                (struct sockaddr *) ((struct server_socket_info *) p_server_socket_info)->server_addr,
                *((struct server_socket_info *) p_server_socket_info)->socket_len);
 

@@ -26,6 +26,7 @@ void init_queue(int sock_fd, Client *client, TaskQueue *q) {
 
     q->queue_info = malloc(sizeof(TaskQueueInfo));
     q->queue_info->sock_fd = sock_fd;
+    q->queue_info->heartbeat_status = false;
     q->queue_info->client = client;
 }
 
@@ -33,7 +34,9 @@ int is_empty(const TaskQueue *q) {
     return (q->front == q->rear);
 }
 
-int is_full(const TaskQueue *q) { return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front); }
+int is_full(const TaskQueue *q) {
+    return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
+}
 
 bool append_task(TaskQueue *q, Task *task) {
     if (is_full(q)) { return false; }

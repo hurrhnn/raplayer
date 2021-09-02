@@ -24,7 +24,7 @@
 #include "../ra_server.h"
 #include "task_queue/task_queue.h"
 
-struct task_scheduler_info {;
+struct task_scheduler_info {
     int sock_fd;
     int *current_clients_count;
     TaskQueue **recv_queues;

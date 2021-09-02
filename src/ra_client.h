@@ -44,6 +44,7 @@
 #define OK "OK"
 
 #define OPUS_FLAG "OPUS"
+#define HEARTBEAT "HEARTBEAT"
 
 #define FRAME_SIZE 960
 

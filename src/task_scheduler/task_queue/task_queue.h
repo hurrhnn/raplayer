@@ -28,6 +28,7 @@
 
 typedef struct {
     int sock_fd;
+    bool heartbeat_status;
     Client *client;
 
 } TaskQueueInfo;
