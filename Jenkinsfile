@@ -12,8 +12,8 @@ void Clean() {
 void Build() {
     checkout scm
     dir("release") {
-        sh '`which cmake` .. -DCMAKE_BUILD_TYPE=Release'
-        sh '`which make`'
+        sh 'cmake .. -DCMAKE_BUILD_TYPE=Release'
+        sh 'make'
     }
 }
 
@@ -24,45 +24,97 @@ void Test() {
 }
 
 pipeline {
-    agent any
-    options {
-        skipDefaultCheckout(true)   // to avoid force checkouts on every node in a first stage
-        disableConcurrentBuilds()   // to avoid concurrent builds on same nodes
-    }
+    agent none
     stages {
-        stage ('Clean') {
-            steps {
-                node('Linux') {
-                    Clean()
+        stage('Initialization') {
+            parallel {
+                stage('Linux') {
+                    agent {
+                        label 'Linux'
+                    }
+                    stages {
+                        stage('Clean on Linux') {
+                            steps {
+                                Clean()
+                            }
+                        }
+                        stage('Build on Linux') {
+                            steps {
+                                Build()
+                            }
+                        }
+                        stage('Test on Linux') {
+                            steps {
+                                Test()
+                                dir("release") {
+                                    sh 'mv raplayer raplayer-linux-x86_64'
+                                    archiveArtifacts artifacts: 'raplayer-linux-x86_64', fingerprint: true
+                                }
+                            }
+                        }
+                    }
                 }
-                node('MacOS') {
-                    Clean()
-                }
-            }
-        }
 
-        stage ('Build') {
-            steps {
-                node('Linux') {
-                    Build()
+                stage('macOS') {
+                    agent {
+                        label 'macOS'
+                    }
+                    stages {
+                        stage('Clean on macOS') {
+                            steps {
+                                Clean()
+                            }
+                        }
+                        stage('Build on macOS') {
+                            steps {
+                                Build()
+                            }
+                        }
+                        stage('Test on macOS') {
+                            steps {
+                                Test()
+                                dir("release") {
+                                    sh 'mv raplayer raplayer-mac-x86_64'
+                                    archiveArtifacts artifacts: 'raplayer-mac-x86_64', fingerprint: true
+                                }
+                            }
+                        }
+                    }
                 }
-                node('MacOS') {
-                    Build()
-                }
-            }
-        }
 
-        stage ('Test') {
-            steps {
-                node('Linux') {
-                    Test()
-                }
-                node('MacOS') {
-                    Test()
+                stage('Windows') {
+                    agent {
+                        label 'Windows'
+                    }
+                    stages {
+                        stage('Clean on Windows') {
+                            steps {
+                                Clean()
+                            }
+                        }
+                        stage('Build on Windows') {
+                            steps {
+                                dir("release") {
+                                    bat 'cmake .. -DCMAKE_BUILD_TYPE=Release'
+                                    bat 'make'
+                                }
+                            }
+                        }
+                        stage('Test on Windows') {
+                            steps {
+                                dir("release") {
+                                    bat 'raplayer.exe'
+                                    bat 'mv raplayer.exe raplayer-win-x86_64.exe'
+                                    archiveArtifacts artifacts: 'raplayer-win-x86_64.exe', fingerprint: true
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+
     post {
         always {
             discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
