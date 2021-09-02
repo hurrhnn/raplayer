@@ -65,6 +65,7 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
             ((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1] = malloc(sizeof(TaskQueue));
 
             Client *client = malloc(sizeof(Client));
+            client->client_id = *current_clients_count;
             client->client_addr = client_addr;
             client->socket_len = sock_len;
 

@@ -24,8 +24,9 @@
 #include <netinet/in.h>
 
 typedef struct {
+    unsigned int client_id;
     struct sockaddr_in client_addr;
     socklen_t socket_len;
-}Client;
+} Client;
 
 #endif

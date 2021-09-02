@@ -237,7 +237,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
 void *provide_20ms_opus_sender(void *p_opus_sender_args) {
     struct opus_sender_args *opus_sender_args = (struct opus_sender_args *) p_opus_sender_args;
 
-    while (!is_EOS) {
+    while ((!is_EOS) && opus_sender_args->recv_queue->queue_info->heartbeat_status != -1) {
         pthread_mutex_lock(opus_sender_args->opus_sender_mutex);
         pthread_cond_wait(opus_sender_args->opus_sender_cond, opus_sender_args->opus_sender_mutex);
         sendto(opus_sender_args->recv_queue->queue_info->sock_fd, opus_sender_args->opus_frame->buffer,
@@ -245,6 +245,53 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
                (struct sockaddr *) &opus_sender_args->recv_queue->queue_info->client->client_addr,
                opus_sender_args->recv_queue->queue_info->client->socket_len);
         pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
+    }
+    return NULL;
+}
+
+void *provide_20ms_opus_timer(void *p_opus_builder_cond) {
+    struct timespec timespec;
+    timespec.tv_sec = 0;
+
+    struct timeval before;
+    struct timeval after;
+
+    gettimeofday(&after, NULL);
+
+    while (!is_EOS) {
+        before = after;
+#if __APPLE__
+        after.tv_usec += 13500;
+#else
+        after.tv_usec += 19900;
+#endif
+
+        timespec.tv_nsec = (after.tv_usec - before.tv_usec) * 1000;
+        nanosleep(&timespec, NULL);
+        pthread_cond_signal((pthread_cond_t *) p_opus_builder_cond);
+    }
+    return NULL;
+}
+
+void *check_heartbeat(void *p_heartbeat_receiver_args) {
+    TaskQueue *recv_queue = (TaskQueue *) p_heartbeat_receiver_args;
+
+    struct timespec timespec;
+    timespec.tv_sec = 1;
+    timespec.tv_nsec = 0;
+
+    while (!is_EOS) {
+        recv_queue->queue_info->heartbeat_status = false;
+        nanosleep(&timespec, NULL);
+        if (!recv_queue->queue_info->heartbeat_status) {
+            printf("\n%d: Connection closed by %s:%d",
+                   recv_queue->queue_info->client->client_id, inet_ntoa(recv_queue->queue_info->client->client_addr.sin_addr),
+                   ntohs(recv_queue->queue_info->client->client_addr.sin_port));
+            printf("\nReceiving client heartbeat timed out.\n");
+            fflush(stdout);
+            recv_queue->queue_info->heartbeat_status = -1;
+            break;
+        }
     }
     return NULL;
 }
@@ -293,6 +340,8 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         pthread_mutex_unlock(complete_init_client_mutex);
 
         pthread_t opus_sender;
+        pthread_t heartbeat_checker;
+
         struct opus_sender_args *p_opus_sender_args = malloc(sizeof(struct opus_sender_args));
         p_opus_sender_args->recv_queue = recv_queues[(*current_clients_count) - 1];
         p_opus_sender_args->opus_frame = ((struct client_handler_info *) p_client_handler_args)->opus_frame;
@@ -301,35 +350,14 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
 
         // Activate opus sender per client.
         pthread_create(&opus_sender, NULL, provide_20ms_opus_sender, (void *) p_opus_sender_args);
+        pthread_create(&heartbeat_checker, NULL, check_heartbeat, (void *) recv_queues[(*current_clients_count) - 1]);
     }
-}
-
-void *provide_20ms_opus_timer(void *p_opus_builder_cond) {
-    struct timespec timespec;
-    timespec.tv_sec = 0;
-
-    struct timeval before;
-    struct timeval after;
-
-    gettimeofday(&after, NULL);
-
-    while (!is_EOS) {
-        before = after;
-#if __APPLE__
-        after.tv_usec += 13500;
-#else
-        after.tv_usec += 19900;
-#endif
-
-        timespec.tv_nsec = (after.tv_usec - before.tv_usec) * 1000;
-        nanosleep(&timespec, NULL);
-        pthread_cond_signal((pthread_cond_t *) p_opus_builder_cond);
-    }
-    return NULL;
 }
 
 __attribute__((noreturn)) void server_signal_timer(int signal) {
-    write(STDOUT_FILENO, "\nClient has been interrupted raplayer. Program now Exit.\n", 57);
+    if (signal == SIGALRM) {
+        write(STDOUT_FILENO, "\nAll of client has been interrupted raplayer. Program now Exit.\n", 64);
+    }
     exit(signal);
 }
 
@@ -531,7 +559,7 @@ int ra_server(int argc, char **argv) {
     // Activate opus builder.
     pthread_create(&opus_builder, NULL, provide_20ms_opus_builder, (void *) p_opus_builder_args);
 
-    if(!stream_mode)
+    if (!stream_mode)
         // Activate opus timer.
         pthread_create(&opus_timer, NULL, provide_20ms_opus_timer, (void *) &opus_builder_cond);
 
@@ -546,7 +574,7 @@ int ra_server(int argc, char **argv) {
     for (int i = 0; i < current_clients_count; i++) {
         sendto(task_scheduler_args.sock_fd, EOS, strlen(EOS), 0,
                (const struct sockaddr *) &task_scheduler_args.recv_queues[i]->queue_info->client->client_addr,
-                       task_scheduler_args.recv_queues[i]->queue_info->client->socket_len);
+               task_scheduler_args.recv_queues[i]->queue_info->client->socket_len);
         cleanup(2, task_scheduler_args.recv_queues[i]->queue_info, task_scheduler_args.recv_queues[i]);
     }
 
