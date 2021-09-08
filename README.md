@@ -77,21 +77,22 @@ Usage: ./raplayer --client <Server Address> [Port]
 ```
 
 - Play audio file using ffmpeg.
-
 ```bash
-ffmpeg -i audio.mp3 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server -
+ffmpeg -loglevel panic -i audio.mp3 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server -
+```
+
+- Play youtube audio using ffmpeg & youtube-dl
+```bash
+youtube-dl --quiet -f bestaudio "[Youtube URL]" -o - | ffmpeg -loglevel panic -i pipe: -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server -
 ```
 
 - Play audio **stream** using ffmpeg.
-
 ```bash
-ffmpeg -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server --stream -
+ffmpeg -loglevel panic -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./raplayer --server --stream -
 ```
 ## Known issues
 
-- ~~Server mode in raplayer does not work in Windows and MacOS environments.~~ - Fixed.
-- ~~When building a source from MacOS to a build script, it is not built at once (must be done two times).~~ - Fixed.
-- ~~When running in pipe mode from server mode, pcm data length is not displayed as "STDIN" when connecting clients in some environments.~~ - Fixed.
+- There is a slight difference in playback time between clients when connecting multiple clients.
 
 ## License
 
