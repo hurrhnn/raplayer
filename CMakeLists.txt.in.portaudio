@@ -11,7 +11,6 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 else()
     ExternalProject_Add(portaudio
         GIT_REPOSITORY https://github.com/PortAudio/portaudio.git
-        GIT_TAG f9823ddf948accc544914cbb3b14a9da822d4aa6
-        CONFIGURE_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/install && chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio/src/portaudio/configure && ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio/src/portaudio/configure --prefix=${CMAKE_CURRENT_BINARY_DIR}/install --enable-static --disable-shared --with-winapi=wmme,wasapi,wdmks --without-jack
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install -DBUILD_SHARED_LIBS=OFF -DPA_USE_JACK=OFF
         PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio/)
 endif()
