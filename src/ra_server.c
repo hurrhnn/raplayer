@@ -250,25 +250,31 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
 }
 
 void *provide_20ms_opus_timer(void *p_opus_builder_cond) {
-    struct timespec timespec;
-    timespec.tv_sec = 0;
-
-    struct timeval before;
-    struct timeval after;
-
-    gettimeofday(&after, NULL);
+    struct timespec start_timespec;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &start_timespec);
+    time_t start_time = (start_timespec.tv_sec * 1000000000L) + start_timespec.tv_nsec, time, offset = 0L, average = 0L;
 
     while (!is_EOS) {
-        before = after;
-#if __APPLE__
-        after.tv_usec += 13500;
-#else
-        after.tv_usec += 19900;
-#endif
+        offset += 20000000L;
+        time = start_time + offset;
 
-        timespec.tv_nsec = (after.tv_usec - before.tv_usec) * 1000;
-        nanosleep(&timespec, NULL);
+        struct timespec current_time, calculated_delay;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+        time -= ((current_time.tv_sec * 1000000000L) + current_time.tv_nsec);
+
+        calculated_delay.tv_sec = ((time / 1000000000L) > 0 ? (time / 1000000000L) : 0);
+        calculated_delay.tv_nsec = ((time % 1000000000L) > 0 ? (time % 1000000000L) : average);
+
+        /* Calculates the time average value for when the current time exceeds the calculated time. */
+        average = (average == 0L ? ((time % 1000000000L) > 0 ? (time % 1000000000L) : average)
+                : ((time % 1000000000L) > 0 ? ((time % 1000000000L) + average) / 2 : average));
+
+        nanosleep(&calculated_delay, NULL);
         pthread_cond_signal((pthread_cond_t *) p_opus_builder_cond);
+
+        /* Adjusts the 20ms interval if the average value was used instead. */
+        if(calculated_delay.tv_nsec == average)
+            average -= 250000L;
     }
     return NULL;
 }
@@ -464,7 +470,7 @@ int ra_server(int argc, char **argv) {
     struct sockaddr_in server_addr;
     int sock_fd = server_init_socket(&server_addr, port);
 
-    //Set fd to Non-Blocking mode.
+    //Set fd to non-blocking mode.
     int flags = fcntl(fileno(fin), F_GETFL, 0);
     fcntl(fileno(fin), F_SETFL, flags | O_NONBLOCK);
 
