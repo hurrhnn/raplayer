@@ -430,6 +430,14 @@ int ra_server(int argc, char **argv) {
     if (!pipe_mode)
         init_pcm_structure(fin, pcm_struct, &before_data_pos);
 
+    if (!pipe_mode && (pcm_struct->pcmFmtChunk.channels != 2 ||
+                        pcm_struct->pcmFmtChunk.sample_rate != 48000 ||
+                        pcm_struct->pcmFmtChunk.bits_per_sample != 16)) {
+        cleanup(1, pcm_struct);
+        fprintf(stdout, "Error: Failed to open input file: It must be a pcm_s16le 48000hz 2 channels wav file.\n");
+        return EXIT_FAILURE;
+    }
+
     printf("\nFile %s info: \n", fin_name);
     printf("Channels: %hd\n", pcm_struct->pcmFmtChunk.channels);
     printf("Sample rate: %u\n", pcm_struct->pcmFmtChunk.sample_rate);
