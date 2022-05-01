@@ -2,7 +2,7 @@
 [![Build Status](https://jenkins.hurrhnn.xyz/job/raplayer/badge/icon)](https://jenkins.hurrhnn.xyz/job/raplayer/)
 <br><br>The raplayer is a C-based cross-platfrom remote audio player.<br> It can play simple audio files or streams.<br>
 
-![image](https://user-images.githubusercontent.com/40728528/130774566-fb301676-7684-4776-8648-11585b054bc1.png)
+![image](https://user-images.githubusercontent.com/40728528/166156129-60f3a516-3f13-4391-91f9-f4166f5615f7.png)
 
 ## Getting Started
 
