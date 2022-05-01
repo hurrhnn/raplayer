@@ -251,7 +251,7 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
 
 void *provide_20ms_opus_timer(void *p_opus_builder_cond) {
     struct timespec start_timespec;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &start_timespec);
+    clock_gettime(CLOCK_MONOTONIC, &start_timespec);
     time_t start_time = (start_timespec.tv_sec * 1000000000L) + start_timespec.tv_nsec, time, offset = 0L, average = 0L;
 
     while (!is_EOS) {
@@ -259,7 +259,7 @@ void *provide_20ms_opus_timer(void *p_opus_builder_cond) {
         time = start_time + offset;
 
         struct timespec current_time, calculated_delay;
-        clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
         time -= ((current_time.tv_sec * 1000000000L) + current_time.tv_nsec);
 
         calculated_delay.tv_sec = ((time / 1000000000L) > 0 ? (time / 1000000000L) : 0);
