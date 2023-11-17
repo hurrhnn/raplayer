@@ -58,17 +58,13 @@ add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_sc
         src/task_queue.c)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
-#    target_link_libraries(raplayer opus portaudio m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
-#    target_link_libraries(raplayer opus portaudio asound m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread) # asound
 elseif (CYGWIN)
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
-#    target_link_libraries(raplayer opus portaudio rt winmm m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} rt winmm m dl pthread)
 else ()
     target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
-#    target_link_libraries(raplayer opus portaudio m dl pthread)
 endif ()
 
 set_target_properties(raplayer
