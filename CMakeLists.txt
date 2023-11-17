@@ -1,13 +1,34 @@
-cmake_minimum_required(VERSION 3.1)
-project(raplayer C)
+cmake_minimum_required(VERSION 3.10)
+project(raplayer VERSION 2.1.0 LANGUAGES C)
+
+include(GNUInstallDirs)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS_RELEASE "-O2")
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
-add_library(opus STATIC IMPORTED)
-add_library(portaudio STATIC IMPORTED)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -O2")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -g")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+option(RAPLAYER_BUILD_DEPS "Try to build core dependencies." ON)
+option(RAPLAYER_DISABLE_APPLICATION "Disable to build raplayer cli application." OFF)
+option(RAPLAYER_INSTALL_PKGCONFIG "install pkg-config module." ON)
+
+set(RAPLAYER_DEP_LIBRARIES "")
+set(RAPLAYER_DEP_INCLUDES "")
+
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+    if (CMAKE_C_COMPILER_ID MATCHES "(GNU|Clang)" OR
+            CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
+        include(CodeCoverage)
+        APPEND_COVERAGE_COMPILER_FLAGS()
+        setup_target_for_coverage_gcovr_sonarqube(NAME coverage EXECUTABLE ctest -j2 --output-on-failure --force-new-ctest-process --progress)
+    endif ()
+    set(RAPLAYER_ENABLE_DEBUG ON)
+endif ()
+
+if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
     find_library(CoreServices.framework CoreServices)
     find_library(CoreFoundation.framework CoreFoundation)
     find_library(AudioUnit.framework AudioUnit)
@@ -15,40 +36,84 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     find_library(CoreAudio.framework CoreAudio)
 endif()
 
-configure_file(CMakeLists.txt.in.opus ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus/CMakeLists.txt)
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
-execute_process(COMMAND ${CMAKE_COMMAND} --build . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
+if(RAPLAYER_BUILD_DEPS)
+    configure_file(cmake/build_deps/CMakeLists.txt.in.opus ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus/CMakeLists.txt)
+    execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
+    execute_process(COMMAND ${CMAKE_COMMAND} --build . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
 
-configure_file(CMakeLists.txt.in.portaudio ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio/CMakeLists.txt)
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio)
-execute_process(COMMAND ${CMAKE_COMMAND} --build . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/portaudio)
+    find_library(OPUS_SHARED_LIBRARIES NAMES "opus" HINTS ${CMAKE_CURRENT_BINARY_DIR}/install/lib ${CMAKE_CURRENT_BINARY_DIR}/install/lib64)
 
-if (WIN32)
-    set(prefix "")
-    set(suffix ".lib")
-else ()
-    set(prefix "lib")
-    set(suffix ".a")
-endif ()
+    list(APPEND RAPLAYER_DEP_LIBRARIES ${OPUS_SHARED_LIBRARIES})
+    list(APPEND RAPLAYER_DEP_INCLUDES ${CMAKE_CURRENT_BINARY_DIR}/install/include)
+else()
+    find_package(LibOpus REQUIRED)
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/install/include)
-find_library(OPUS_LIBRARIES NAMES "${prefix}opus${suffix}" HINTS ${CMAKE_CURRENT_BINARY_DIR}/install/lib ${CMAKE_CURRENT_BINARY_DIR}/install/lib64)
-find_library(PORTAUDIO_LIBRARIES NAMES "${prefix}portaudio${suffix}" HINTS ${CMAKE_CURRENT_BINARY_DIR}/install/lib ${CMAKE_CURRENT_BINARY_DIR}/install/lib64)
+    list(APPEND RAPLAYER_DEP_LIBRARIES ${OPUS_LIBRARIES})
+    list(APPEND RAPLAYER_DEP_INCLUDES ${OPUS_INCLUDE_DIRS})
+endif()
 
-
-set_target_properties(opus PROPERTIES IMPORTED_LOCATION ${OPUS_LIBRARIES})
-set_target_properties(portaudio PROPERTIES IMPORTED_LOCATION ${PORTAUDIO_LIBRARIES})
-
-add_executable(raplayer src/main.c src/ra_client.c src/ra_server.c src/ra_client.h src/ra_server.h src/chacha20/chacha20.h src/chacha20/chacha20.c src/task_scheduler/task_scheduler.c src/task_scheduler/task_scheduler.h src/task_scheduler/task_queue/task/task.h src/task_dispatcher/task_dispatcher.c src/task_dispatcher/task_dispatcher.h src/task_scheduler/task_queue/task_queue.c src/task_scheduler/task_queue/task_queue.h)
-add_dependencies(raplayer opus portaudio)
-
+configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
+FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADER "include/*.h")
+add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_scheduler.c src/task_dispatcher.c
+        src/task_queue.c)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    target_link_libraries(raplayer opus portaudio m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
+#    target_link_libraries(raplayer opus portaudio m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    target_link_libraries(raplayer opus portaudio asound m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
+#    target_link_libraries(raplayer opus portaudio asound m dl pthread)
 elseif (CYGWIN)
-    target_link_libraries(raplayer opus portaudio rt winmm m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
+#    target_link_libraries(raplayer opus portaudio rt winmm m dl pthread)
 else ()
-    target_link_libraries(raplayer opus portaudio m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
+#    target_link_libraries(raplayer opus portaudio m dl pthread)
+endif ()
+
+set_target_properties(raplayer
+        PROPERTIES SOVERSION
+        ${PROJECT_VERSION_MAJOR}
+        VERSION
+        ${CMAKE_PROJECT_VERSION}
+        PUBLIC_HEADER
+        "${RAPLAYER_PUBLIC_HEADER}")
+
+target_include_directories(
+        raplayer
+        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/raplayer>
+        ${RAPLAYER_DEP_INCLUDES})
+
+install(TARGETS raplayer
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/raplayer)
+
+if (RAPLAYER_INSTALL_PKGCONFIG)
+    set(prefix ${CMAKE_INSTALL_PREFIX})
+    set(exec_prefix ${CMAKE_INSTALL_PREFIX})
+    set(libdir ${CMAKE_INSTALL_FULL_LIBDIR})
+    set(includedir ${CMAKE_INSTALL_FULL_INCLUDEDIR})
+    set(VERSION ${CMAKE_PROJECT_VERSION})
+
+    configure_file(raplayer.pc.in raplayer.pc)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/raplayer.pc
+            DESTINATION ${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig)
+endif ()
+
+if (NOT TARGET uninstall)
+    configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake"
+            IMMEDIATE @ONLY)
+
+    add_custom_target(uninstall
+            COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake)
+endif ()
+
+if (NOT RAPLAYER_DISABLE_APPLICATION)
+    add_subdirectory(application)
 endif ()
