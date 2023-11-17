@@ -37,56 +37,11 @@
 #ifndef RAPLAYER_RA_SERVER_H
 #define RAPLAYER_RA_SERVER_H
 
-#define BYTE 1
-#define WORD 2
-#define DWORD 4
-
-#define OK "OK"
-#define OPUS_FLAG "OPUS"
-#define HEARTBEAT "HEARTBEAT"
-
-#define FRAME_SIZE 960
-#define MAX_DATA_SIZE 4096
-#define APPLICATION OPUS_APPLICATION_AUDIO
-
-#define EOS "EOS" // End of Stream FLAG.
-
-#include "task_scheduler/task_scheduler.h"
-#include "task_scheduler/task_queue/task_queue.h"
-
-struct pcm_header {
-    char chunk_id[4];
-    uint32_t chunk_size;
-    char format[4];
-};
-
-struct pcm_fmt_chunk {
-    char chunk_id[4];
-    uint32_t chunk_size;
-
-    uint16_t audio_format;
-    uint16_t channels;
-    uint32_t sample_rate;
-    uint32_t byte_rate;
-
-    uint16_t block_align;
-    uint16_t bits_per_sample;
-};
-
-struct pcm_data_chunk {
-    char chunk_id[4];
-    uint32_t chunk_size;
-    char *data;
-};
-
-struct pcm {
-    struct pcm_header pcmHeader;
-    struct pcm_fmt_chunk pcmFmtChunk;
-    struct pcm_data_chunk pcmDataChunk;
-};
+#include <raplayer/task_scheduler.h>
+#include <raplayer/task_queue.h>
 
 struct opus_builder_args {
-    struct pcm *pcm_struct;
+    int **server_status;
     FILE *fin;
     OpusEncoder *encoder;
     unsigned char *crypto_payload;
@@ -100,6 +55,7 @@ struct opus_builder_args {
 };
 
 struct opus_sender_args {
+    int **server_status;
     TaskQueue *recv_queue;
     Task *opus_frame;
 
@@ -107,6 +63,6 @@ struct opus_sender_args {
     pthread_cond_t *opus_sender_cond;
 };
 
-int ra_server(int argc, char **argv);
+int ra_server(int port, int fd, uint32_t len, int** status);
 
 #endif

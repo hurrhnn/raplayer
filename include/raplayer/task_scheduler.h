@@ -18,36 +18,46 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <math.h>
-#include <termios.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <signal.h>
+#ifndef RAPLAYER_TASK_SCHEDULER_H
+#define RAPLAYER_TASK_SCHEDULER_H
+
 #include <pthread.h>
-#include <opus/opus.h>
-#include <portaudio.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <raplayer/task_queue.h>
 
-#ifndef RAPLAYER_RA_CLIENT_H
-#define RAPLAYER_RA_CLIENT_H
+struct task_scheduler_info {
+    int sock_fd;
+    int *current_clients_count;
+    TaskQueue **recv_queues;
 
-#define BYTE 1
-#define WORD 2
-#define DWORD 4
+    pthread_mutex_t *complete_init_queue_mutex;
+    pthread_cond_t *complete_init_queue_cond;
+};
 
-#define HELLO "HELLO"
-#define OK "OK"
+struct client_handler_info {
+    int **server_status;
+    int *current_clients_count;
+    TaskQueue ***recv_queues;
+    uint32_t data_len;
+    unsigned char *crypto_payload;
 
-#define OPUS_FLAG "OPUS"
-#define HEARTBEAT "HEARTBEAT"
+    bool *stop_consumer;
+    pthread_t *stream_consumer;
 
-#define FRAME_SIZE 960
+    pthread_mutex_t *complete_init_mutex[2];
+    pthread_mutex_t *opus_sender_mutex;
 
-int ra_client(int argc, char **argv);
+    pthread_cond_t *complete_init_cond[2];
+    pthread_cond_t *opus_sender_cond;
+
+    Task *opus_frame;
+};
+
+_Noreturn void *schedule_task(void *p_task_scheduler_args);
 
 #endif

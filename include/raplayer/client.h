@@ -18,12 +18,23 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef OPUSSTREAMER_SERVER_TASK_DISPATCHER_H
-#define OPUSSTREAMER_SERVER_TASK_DISPATCHER_H
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <math.h>
+#include <termios.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <signal.h>
+#include <pthread.h>
+#include <opus/opus.h>
 
-#include "../task_scheduler/task_scheduler.h"
-#include "../task_scheduler/task_queue/task_queue.h"
+#ifndef RAPLAYER_RA_CLIENT_H
+#define RAPLAYER_RA_CLIENT_H
 
-Task recvfrom_queue(TaskQueue *recv_queue);
+int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void* user_data), void* callback_user_data, int**client_status);
 
 #endif

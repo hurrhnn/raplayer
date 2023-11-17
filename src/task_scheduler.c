@@ -18,7 +18,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "task_scheduler.h"
+#include <raplayer/task_scheduler.h>
+#include <raplayer/config.h>
 
 _Noreturn void *schedule_task(void *p_task_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -56,7 +57,7 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
         if (client_id == -1) {
             (*current_clients_count) += 1;
 
-            printf("\n%d: Connection from %s:%d\n", *current_clients_count, inet_ntoa(client_addr.sin_addr),
+            printf("\n%02d: Connection from %s:%d\n", *current_clients_count, inet_ntoa(client_addr.sin_addr),
                    ntohs(client_addr.sin_port));
             fflush(stdout);
 

@@ -18,7 +18,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "chacha20.h"
+#include <raplayer/chacha20.h>
 
 unsigned char *generate_random_bytestream(size_t num_bytes)
 {

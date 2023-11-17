@@ -18,34 +18,16 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "../../ra_server.h"
+#include <raplayer/task_dispatcher.h>
 
-void init_queue(int sock_fd, Client *client, TaskQueue *q) {
-    q->rear = 0;
-    q->front = 0;
+Task recvfrom_queue(TaskQueue *recv_queue) {
+    while (true) {
+        if (!is_empty(recv_queue)) {
+            Task *current_task = perf_task(recv_queue);
+            Task return_task = *current_task;
 
-    q->queue_info = malloc(sizeof(TaskQueueInfo));
-    q->queue_info->sock_fd = sock_fd;
-    q->queue_info->heartbeat_status = false;
-    q->queue_info->client = client;
-}
-
-int is_empty(const TaskQueue *q) {
-    return (q->front == q->rear);
-}
-
-int is_full(const TaskQueue *q) {
-    return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
-}
-
-bool append_task(TaskQueue *q, Task *task) {
-    if (is_full(q)) { return false; }
-    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
-    q->tasks[q->rear] = task;
-    return true;
-}
-
-Task *perf_task(TaskQueue *q) {
-    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
-    return q->tasks[q->front];
+            free(current_task);
+            return return_task;
+        }
+    }
 }

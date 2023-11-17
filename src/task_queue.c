@@ -18,38 +18,34 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef OPUSSTREAMER_SERVER_TASK_QUEUE_H
-#define OPUSSTREAMER_SERVER_TASK_QUEUE_H
+#include <raplayer/task_queue.h>
 
-#include "client/client.h"
-#include "task/task.h"
+void init_queue(int sock_fd, Client *client, TaskQueue *q) {
+    q->rear = 0;
+    q->front = 0;
 
-#define MAX_QUEUE_SIZE 0x7fff
+    q->queue_info = malloc(sizeof(TaskQueueInfo));
+    q->queue_info->sock_fd = sock_fd;
+    q->queue_info->heartbeat_status = false;
+    q->queue_info->client = client;
+}
 
-typedef struct {
-    int sock_fd;
-    int heartbeat_status;
-    Client *client;
+int is_empty(const TaskQueue *q) {
+    return (q->front == q->rear);
+}
 
-} TaskQueueInfo;
+int is_full(const TaskQueue *q) {
+    return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
+}
 
-typedef struct {
-    int front;
-    int rear;
+bool append_task(TaskQueue *q, Task *task) {
+    if (is_full(q)) { return false; }
+    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
+    q->tasks[q->rear] = task;
+    return true;
+}
 
-    TaskQueueInfo *queue_info;
-    Task *tasks[MAX_QUEUE_SIZE];
-
-} TaskQueue;
-
-void init_queue(int sock_fd, Client *client, TaskQueue *q);
-
-int is_full(const TaskQueue *q);
-
-int is_empty(const TaskQueue *q);
-
-bool append_task(TaskQueue *q, Task *task);
-
-Task *perf_task(TaskQueue *q);
-
-#endif
+Task *perf_task(TaskQueue *q) {
+    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+    return q->tasks[q->front];
+}

@@ -17,40 +17,50 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
+#include <raplayer/config.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-#ifndef OPUSSTREAMER_SERVER_TASK_SCHEDULER_H
-#define OPUSSTREAMER_SERVER_TASK_SCHEDULER_H
+#ifndef RAPLAYER_TASK_QUEUE_H
+#define RAPLAYER_TASK_QUEUE_H
 
-#include "../ra_server.h"
-#include "task_queue/task_queue.h"
+typedef struct {
+    unsigned int client_id;
+    struct sockaddr_in client_addr;
+    socklen_t socket_len;
+} Client;
 
-struct task_scheduler_info {
+typedef struct {
+    char buffer[MAX_DATA_SIZE];
+    ssize_t buffer_len;
+}Task;
+
+typedef struct {
     int sock_fd;
-    int *current_clients_count;
-    TaskQueue **recv_queues;
+    int heartbeat_status;
+    Client *client;
 
-    pthread_mutex_t *complete_init_queue_mutex;
-    pthread_cond_t *complete_init_queue_cond;
-};
+} TaskQueueInfo;
 
-struct client_handler_info {
-    int *current_clients_count;
-    TaskQueue ***recv_queues;
-    struct pcm *pcm_struct;
-    unsigned char *crypto_payload;
+typedef struct {
+    int front;
+    int rear;
 
-    bool *stop_consumer;
-    pthread_t *stream_consumer;
+    TaskQueueInfo *queue_info;
+    Task *tasks[MAX_QUEUE_SIZE];
 
-    pthread_mutex_t *complete_init_mutex[2];
-    pthread_mutex_t *opus_sender_mutex;
+} TaskQueue;
 
-    pthread_cond_t *complete_init_cond[2];
-    pthread_cond_t *opus_sender_cond;
+void init_queue(int sock_fd, Client *client, TaskQueue *q);
 
-    Task *opus_frame;
-};
+int is_full(const TaskQueue *q);
 
-_Noreturn void *schedule_task(void *p_task_scheduler_args);
+int is_empty(const TaskQueue *q);
+
+bool append_task(TaskQueue *q, Task *task);
+
+Task *perf_task(TaskQueue *q);
 
 #endif

@@ -18,16 +18,13 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "task_dispatcher.h"
+#ifndef RAPLAYER_TASK_DISPATCHER_H
+#define RAPLAYER_TASK_DISPATCHER_H
 
-Task recvfrom_queue(TaskQueue *recv_queue) {
-    while (true) {
-        if (!is_empty(recv_queue)) {
-            Task *current_task = perf_task(recv_queue);
-            Task return_task = *current_task;
+#include <stdlib.h>
+#include <raplayer/task_scheduler.h>
+#include <raplayer/task_queue.h>
 
-            free(current_task);
-            return return_task;
-        }
-    }
-}
+Task recvfrom_queue(TaskQueue *recv_queue);
+
+#endif
