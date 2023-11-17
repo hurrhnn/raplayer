@@ -4,5 +4,5 @@ include(ExternalProject)
 
 ExternalProject_Add(libopus
         GIT_REPOSITORY https://github.com/xiph/opus.git
-        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install
+        CMAKE_ARGS -DOPUS_BUILD_SHARED_LIBRARY=ON -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install
         PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus/)
