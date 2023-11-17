@@ -19,7 +19,7 @@ void Build() {
 
 void Test() {
     dir("release") {
-        sh './raplayer'
+        sh './application/main'
     }
 }
 
@@ -47,7 +47,7 @@ pipeline {
                             steps {
                                 Test()
                                 dir("release") {
-                                    sh 'mv raplayer raplayer-linux-x86_64'
+                                    sh 'mv application/main raplayer-linux-x86_64'
                                     archiveArtifacts artifacts: 'raplayer-linux-x86_64', fingerprint: true
                                 }
                             }
@@ -74,7 +74,7 @@ pipeline {
                             steps {
                                 Test()
                                 dir("release") {
-                                    sh 'mv raplayer raplayer-mac-x86_64'
+                                    sh 'mv application/main raplayer-mac-x86_64'
                                     archiveArtifacts artifacts: 'raplayer-mac-x86_64', fingerprint: true
                                 }
                             }
@@ -103,8 +103,8 @@ pipeline {
                         stage('Test on Windows') {
                             steps {
                                 dir("release") {
-                                    bat 'raplayer.exe'
-                                    bat 'mv raplayer.exe raplayer-win-x86_64.exe'
+                                    bat 'application/main.exe'
+                                    bat 'mv application/main.exe raplayer-win-x86_64.exe'
                                     archiveArtifacts artifacts: 'raplayer-win-x86_64.exe', fingerprint: true
                                 }
                             }
