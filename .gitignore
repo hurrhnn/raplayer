@@ -1,4 +1,4 @@
-# github's self-generated CMake .gitignore templete.
+# ---> CMake
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
@@ -11,8 +11,55 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 
-# begin of custom path.
+# ---> C
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Custom Directories & Files
 .idea/
-release/
 submodules/
-wav_examples/
+build/
+release/
+cmake-build-build-coverage/
+include/raplayer/config.h
