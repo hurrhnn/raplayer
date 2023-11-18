@@ -26,4 +26,21 @@
 
 #define EOS "EOS"
 
+#ifdef __ANDROID__
+#ifndef RAPLAYER_ANDROID_WORKAROUND
+#define RAPLAYER_ANDROID_WORKAROUND
+
+#include <pthread.h>
+#define pthread_cancel(h) pthread_kill(h, 0)
+
+#define PTHREAD_CANCEL_ENABLE 0
+#define PTHREAD_CANCEL_ASYNCHRONOUS 0
+#define pthread_setcanceltype(foo, bar) \
+        while(foo);                     \
+        while(bar);                     \
+
+#define pthread_setcancelstate(foo, bar) pthread_setcanceltype(foo, bar)
+#endif
+#endif /* __ANDROID__ */
+
 #endif //RAPLAYER_CONFIG_H
