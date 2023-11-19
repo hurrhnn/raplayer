@@ -103,9 +103,11 @@ pipeline {
                         stage('Test on Windows') {
                             steps {
                                 dir("release") {
-                                    bat 'application/main.exe'
-                                    bat 'mv application/main.exe raplayer-win-x86_64.exe'
-                                    archiveArtifacts artifacts: 'raplayer-win-x86_64.exe', fingerprint: true
+                                    dir("application") {
+                                        bat 'main.exe'
+                                        bat 'mv main.exe raplayer-win-x86_64.exe'
+                                        archiveArtifacts artifacts: 'raplayer-win-x86_64.exe', fingerprint: true
+                                    }
                                 }
                             }
                         }
