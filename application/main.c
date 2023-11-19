@@ -269,11 +269,8 @@ void *control_volume(void *p_callback_user_data_args) {
                     break;
 
                 case 0x03:
-                    raise(SIGINT);
-                    break;
-
                 case 0x1A:
-                    raise(SIGSTOP);
+                    **is_client_eos = 1;
                     break;
 
                 default:
