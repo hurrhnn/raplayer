@@ -35,8 +35,8 @@ struct server_socket_info {
     int *socket_len;
 };
 
-int client_init_socket(char *str_server_addr, int server_port, struct sockaddr_in *p_server_addr) {
-    struct sockaddr_in server_addr = *p_server_addr;
+int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p_ctx_server_addr) {
+    struct sockaddr_in ctx_server_addr = *p_ctx_server_addr;
     int sock_fd;
 
     // Creating socket file descriptor.
@@ -45,27 +45,27 @@ int client_init_socket(char *str_server_addr, int server_port, struct sockaddr_i
         exit(EXIT_FAILURE);
     }
 
-    memset((char *) &server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET; // IPv4
-    server_addr.sin_port = htons((uint16_t) server_port);
+    memset((char *) &ctx_server_addr, 0, sizeof(ctx_server_addr));
+    ctx_server_addr.sin_family = AF_INET; // IPv4
+    ctx_server_addr.sin_port = htons((uint16_t) server_port);
 
     struct hostent *hostent;
     struct in_addr **addr_list;
 
-    if ((hostent = gethostbyname(str_server_addr)) == NULL) {
-        printf("Error: Connection Cannot resolved to %s.\n", str_server_addr);
+    if ((hostent = gethostbyname(server_addr)) == NULL) {
+        printf("Error: Connection Cannot resolved to %s.\n", server_addr);
         exit(EXIT_FAILURE);
     } else {
         addr_list = (struct in_addr **) hostent->h_addr_list;
-        strcpy(str_server_addr, inet_ntoa(*addr_list[0]));
+        strcpy(server_addr, inet_ntoa(*addr_list[0]));
     }
 
-    if (!inet_pton(AF_INET, str_server_addr, &server_addr.sin_addr)) {
+    if (!inet_pton(AF_INET, server_addr, &ctx_server_addr.sin_addr)) {
         puts("Error: Convert Internet host address Failed.");
         exit(EXIT_FAILURE);
     }
 
-    *p_server_addr = server_addr;
+    *p_ctx_server_addr = ctx_server_addr;
     return sock_fd;
 }
 
@@ -143,7 +143,6 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
     struct stream_info pStreamInfo;
     struct sockaddr_in server_addr;
 
-    alarm(2); // Start time-out alarm.
     int sock_fd = client_init_socket(address, port, &server_addr);
     int socket_len = sizeof(server_addr);
 
