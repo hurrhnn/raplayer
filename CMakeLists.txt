@@ -83,7 +83,8 @@ endif()
 configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
 FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADER "include/*.h")
 add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_scheduler.c src/task_dispatcher.c
-        src/task_queue.c)
+        src/task_queue.c
+        src/utils.c)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
