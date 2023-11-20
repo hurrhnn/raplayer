@@ -20,8 +20,7 @@
 
 #include <raplayer/chacha20.h>
 
-unsigned char *generate_random_bytestream(size_t num_bytes)
-{
+unsigned char *generate_random_bytestream(size_t num_bytes) {
     struct timeval timeval;
     gettimeofday(&timeval, NULL);
     srandom(timeval.tv_usec);
@@ -67,8 +66,6 @@ void chacha20_init_block(struct chacha20_context *ctx, uint8_t key[], uint8_t no
     ctx->state[13] = pack_4bytes(nonce + 0 * 4);
     ctx->state[14] = pack_4bytes(nonce + 1 * 4);
     ctx->state[15] = pack_4bytes(nonce + 2 * 4);
-
-    memcpy(ctx->nonce, nonce, sizeof(ctx->nonce));
 }
 
 void chacha20_block_set_counter(struct chacha20_context *ctx, uint64_t counter) {

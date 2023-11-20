@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <opus/opus.h>
+#include <raplayer/config.h>
 
 #ifndef RAPLAYER_RA_CLIENT_H
 #define RAPLAYER_RA_CLIENT_H

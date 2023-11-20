@@ -78,7 +78,7 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
             pthread_cond_signal(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_cond);
             pthread_mutex_unlock(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_mutex);
         } else {
-            if (!strncmp(task->buffer, HEARTBEAT, sizeof(HEARTBEAT)))
+            if (!strncmp((char *) task->buffer, HEARTBEAT, sizeof(HEARTBEAT)))
                 ((TaskQueue **) task_scheduler_args->recv_queues)[client_id]->queue_info->heartbeat_status = true;
             else
                 append_task(((TaskQueue **) task_scheduler_args->recv_queues)[client_id], task);

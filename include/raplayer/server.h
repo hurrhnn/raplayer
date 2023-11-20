@@ -39,12 +39,12 @@
 
 #include <raplayer/task_scheduler.h>
 #include <raplayer/task_queue.h>
+#include <raplayer/chacha20.h>
 
 struct opus_builder_args {
     int **server_status;
     FILE *fin;
     OpusEncoder *encoder;
-    unsigned char *crypto_payload;
 
     pthread_mutex_t *opus_builder_mutex;
     pthread_mutex_t *opus_sender_mutex;

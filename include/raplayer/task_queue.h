@@ -17,11 +17,12 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
-#include <raplayer/config.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <raplayer/config.h>
+#include <raplayer/chacha20.h>
 
 #ifndef RAPLAYER_TASK_QUEUE_H
 #define RAPLAYER_TASK_QUEUE_H
@@ -30,10 +31,11 @@ typedef struct {
     unsigned int client_id;
     struct sockaddr_in client_addr;
     socklen_t socket_len;
+    struct chacha20_context crypto_context;
 } Client;
 
 typedef struct {
-    char buffer[MAX_DATA_SIZE];
+    unsigned char buffer[MAX_DATA_SIZE];
     ssize_t buffer_len;
 }Task;
 

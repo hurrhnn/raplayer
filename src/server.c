@@ -19,10 +19,12 @@
 */
 
 #include <raplayer/config.h>
+#include <raplayer/client.h>
 #include <raplayer/server.h>
 #include <raplayer/chacha20.h>
 #include <raplayer/task_scheduler.h>
 #include <raplayer/task_dispatcher.h>
+#include <raplayer/utils.h>
 
 void *consume_until_connection(void *p_stream_consumer_args) {
     void **stream_consumer_args = p_stream_consumer_args;
@@ -66,7 +68,7 @@ int server_init_socket(const struct sockaddr_in *p_server_addr, int port) {
 
 bool ready_sock_server_seq1(TaskQueue *recv_queue) {
     Task task = recvfrom_queue(recv_queue);
-    if (strncmp(task.buffer, "HELLO", task.buffer_len) == 0)
+    if (strncmp((char *) task.buffer, "HELLO", task.buffer_len) == 0)
         return true;
     else
         return false;
@@ -94,7 +96,7 @@ bool ready_sock_server_seq2(TaskQueue *recv_queue, uint32_t len) {
     free(buffer);
 
     Task task = recvfrom_queue(recv_queue);
-    if (strncmp(task.buffer, "OK", task.buffer_len) != 0) {
+    if (strncmp((char *) task.buffer, "OK", task.buffer_len) != 0) {
         return 0;
     }
 
@@ -103,13 +105,13 @@ bool ready_sock_server_seq2(TaskQueue *recv_queue, uint32_t len) {
                (struct sockaddr *) &recv_queue->queue_info->client->client_addr,
                recv_queue->queue_info->client->socket_len)) {
         task = recvfrom_queue(recv_queue);
-        if (stream_info_size == strtol(task.buffer, NULL, 10)) {
+        if (stream_info_size == strtol((char *) task.buffer, NULL, 10)) {
             sendto(recv_queue->queue_info->sock_fd, &len, DWORD, 0,
                    (struct sockaddr *) &recv_queue->queue_info->client->client_addr,
                    recv_queue->queue_info->client->socket_len);
 
             task = recvfrom_queue(recv_queue);
-            if (strncmp(task.buffer, "OK", task.buffer_len) == 0)
+            if (strncmp((char *) task.buffer, "OK", task.buffer_len) == 0)
                 return true;
         }
     }
@@ -117,8 +119,9 @@ bool ready_sock_server_seq2(TaskQueue *recv_queue, uint32_t len) {
 }
 
 bool
-ready_sock_server_seq3(TaskQueue *recv_queue, const unsigned char *crypto_payload) {
+ready_sock_server_seq3(TaskQueue *recv_queue) {
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
+    unsigned char *crypto_payload = generate_random_bytestream(crypto_payload_size);
 
     if (crypto_payload_size ==
         sendto(recv_queue->queue_info->sock_fd, crypto_payload, crypto_payload_size, 0,
@@ -126,8 +129,12 @@ ready_sock_server_seq3(TaskQueue *recv_queue, const unsigned char *crypto_payloa
                recv_queue->queue_info->client->socket_len)) {
 
         Task task = recvfrom_queue(recv_queue);
-        if (!strncmp(task.buffer, OK, task.buffer_len))
+        if (!strncmp((char *) task.buffer, OK, task.buffer_len)) {
+            memset(&recv_queue->queue_info->client->crypto_context, 0x0, sizeof(struct chacha20_context));
+            chacha20_init_context(&recv_queue->queue_info->client->crypto_context, crypto_payload,
+                                  crypto_payload + CHACHA20_NONCEBYTES, 0);
             return true;
+        }
     }
     return false;
 }
@@ -135,16 +142,15 @@ ready_sock_server_seq3(TaskQueue *recv_queue, const unsigned char *crypto_payloa
 void *provide_20ms_opus_builder(void *p_opus_builder_args) {
     struct opus_builder_args *opus_builder_args = (struct opus_builder_args *) p_opus_builder_args;
 
+    unsigned char *buffer = calloc(MAX_DATA_SIZE, BYTE);
     opus_int16 in[FRAME_SIZE * OPUS_AUDIO_CH];
-    unsigned char c_bits[FRAME_SIZE];
-    struct chacha20_context ctx;
+    unsigned char c_bits[FRAME_SIZE]; // TODO: need to change for correspond to adaptive latency
 
     while (1) {
         unsigned char pcm_bytes[FRAME_SIZE * OPUS_AUDIO_CH * WORD];
 
         /* Read a 16 bits/sample audio frame. */
-        fread(pcm_bytes, WORD * OPUS_AUDIO_CH, FRAME_SIZE,
-              opus_builder_args->fin);
+        fread(pcm_bytes, WORD * OPUS_AUDIO_CH, FRAME_SIZE,opus_builder_args->fin);
         if (feof(opus_builder_args->fin)) // End Of Stream.
             break;
 
@@ -160,16 +166,13 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         }
 
         /* Encrypt the frame. */
-        chacha20_init_context(&ctx, opus_builder_args->crypto_payload,
-                              opus_builder_args->crypto_payload + CHACHA20_NONCEBYTES, 0);
-        chacha20_xor(&ctx, c_bits, nbBytes);
+//        chacha20_xor(&crypto_context, c_bits, nbBytes); /* use crypto session instead of shared context */
 
         /* Create payload. */
         const unsigned int nbBytes_len = (int) floor(log10(nbBytes) + 1);
-        char *buffer = calloc(nbBytes_len + sizeof(OPUS_FLAG) + nbBytes, WORD);
 
-        sprintf(buffer, "%d", nbBytes);
-        strcat(buffer, OPUS_FLAG);
+        sprintf((char *) buffer, "%d", nbBytes);
+        strcat((char *) buffer, OPUS_FLAG);
         memcpy(buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1, c_bits, nbBytes);
 
         /* Waiting for opus timer's signal & Send audio frames. */
@@ -178,7 +181,6 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         pthread_mutex_lock(opus_builder_args->opus_sender_mutex);
 
         memcpy(opus_builder_args->opus_frame->buffer, buffer, nbBytes_len + sizeof(OPUS_FLAG) + nbBytes);
-        free(buffer);
         opus_builder_args->opus_frame->buffer_len = (ssize_t) (nbBytes_len + sizeof(OPUS_FLAG) + nbBytes);
 
         pthread_mutex_unlock(opus_builder_args->opus_sender_mutex);
@@ -186,21 +188,26 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         pthread_mutex_unlock(opus_builder_args->opus_builder_mutex);
     }
     **opus_builder_args->server_status = true;
+    free(buffer);
     return NULL;
 }
 
 void *provide_20ms_opus_sender(void *p_opus_sender_args) {
+    unsigned char **calculated_c_bits = malloc(sizeof(void *));
     struct opus_sender_args *opus_sender_args = (struct opus_sender_args *) p_opus_sender_args;
 
     while ((!**opus_sender_args->server_status) && opus_sender_args->recv_queue->queue_info->heartbeat_status != -1) {
         pthread_mutex_lock(opus_sender_args->opus_sender_mutex);
         pthread_cond_wait(opus_sender_args->opus_sender_cond, opus_sender_args->opus_sender_mutex);
+        pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
+        uint64_t nbBytes = provide_20ms_opus_offset_calculator(opus_sender_args->opus_frame->buffer, calculated_c_bits);
+        chacha20_xor(&opus_sender_args->recv_queue->queue_info->client->crypto_context, *calculated_c_bits, nbBytes);
         sendto(opus_sender_args->recv_queue->queue_info->sock_fd, opus_sender_args->opus_frame->buffer,
                opus_sender_args->opus_frame->buffer_len, 0,
                (struct sockaddr *) &opus_sender_args->recv_queue->queue_info->client->client_addr,
                opus_sender_args->recv_queue->queue_info->client->socket_len);
-        pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
     }
+    free(calculated_c_bits);
     return NULL;
 }
 
@@ -225,13 +232,13 @@ void *provide_20ms_opus_timer(void *p_opus_timer_args) {
 
         /* Calculates the time average value for when the current time exceeds the calculated time. */
         average = (average == 0L ? ((time % 1000000000L) > 0 ? (time % 1000000000L) : average)
-                : ((time % 1000000000L) > 0 ? ((time % 1000000000L) + average) / 2 : average));
+                                 : ((time % 1000000000L) > 0 ? ((time % 1000000000L) + average) / 2 : average));
 
         nanosleep(&calculated_delay, NULL);
         pthread_cond_signal((pthread_cond_t *) p_opus_builder_cond);
 
         /* Adjusts the 20ms interval if the average value was used instead. */
-        if(calculated_delay.tv_nsec == average)
+        if (calculated_delay.tv_nsec == average)
             average -= 250000L;
     }
     return NULL;
@@ -249,7 +256,8 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
         nanosleep(&timespec, NULL);
         if (!recv_queue->queue_info->heartbeat_status) {
             printf("\n%02d: Connection closed by %s:%d",
-                   recv_queue->queue_info->client->client_id, inet_ntoa(recv_queue->queue_info->client->client_addr.sin_addr),
+                   recv_queue->queue_info->client->client_id,
+                   inet_ntoa(recv_queue->queue_info->client->client_addr.sin_addr),
                    ntohs(recv_queue->queue_info->client->client_addr.sin_port));
             printf("\nReceiving client heartbeat timed out.\nStopped Sending Opus Packets and cleaned up.\n");
             fflush(stdout);
@@ -262,7 +270,6 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
 _Noreturn void *handle_client(void *p_client_handler_args) {
     int **server_status = ((struct client_handler_info *) p_client_handler_args)->server_status;
     const int *current_clients_count = ((struct client_handler_info *) p_client_handler_args)->current_clients_count;
-    const unsigned char *crypto_payload = ((struct client_handler_info *) p_client_handler_args)->crypto_payload;
 
     pthread_mutex_t *complete_init_queue_mutex = ((struct client_handler_info *) p_client_handler_args)->complete_init_mutex[0];
     pthread_cond_t *complete_init_queue_cond = ((struct client_handler_info *) p_client_handler_args)->complete_init_cond[0];
@@ -278,7 +285,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         if (ready_sock_server_seq1(recv_queues[(*current_clients_count) - 1])) {
             if (ready_sock_server_seq2(recv_queues[(*current_clients_count) - 1],
                                        ((struct client_handler_info *) p_client_handler_args)->data_len)) {
-                if (ready_sock_server_seq3(recv_queues[(*current_clients_count) - 1], crypto_payload))
+                if (ready_sock_server_seq3(recv_queues[(*current_clients_count) - 1]))
                     printf("Preparing socket sequence has been Successfully Completed.");
                 else {
                     printf("Error: A crypto preparation sequence Failed.\n");
@@ -319,7 +326,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
     }
 }
 
-int ra_server(int port, int fd, uint32_t data_len, int** status) {
+int ra_server(int port, int fd, uint32_t data_len, int **status) {
     bool stop_consumer = false;
     bool stream_mode = (fd == 0);
     FILE *fin = fdopen(fd, "rb");
@@ -356,7 +363,6 @@ int ra_server(int port, int fd, uint32_t data_len, int** status) {
     fcntl(fileno(fin), F_SETFL, flags | O_NONBLOCK);
 
     int current_clients_count = 0;
-    unsigned char *crypto_payload = generate_random_bytestream(CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES);
     pthread_mutex_t complete_init_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_t complete_init_client_mutex = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_t opus_builder_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -381,7 +387,6 @@ int ra_server(int port, int fd, uint32_t data_len, int** status) {
     client_handler_args.current_clients_count = &current_clients_count;
     client_handler_args.recv_queues = &task_scheduler_args.recv_queues;
     client_handler_args.data_len = data_len;
-    client_handler_args.crypto_payload = crypto_payload;
 
     client_handler_args.stream_consumer = p_stream_consumer;
     client_handler_args.stop_consumer = &stop_consumer;
@@ -433,11 +438,10 @@ int ra_server(int port, int fd, uint32_t data_len, int** status) {
 
     pthread_t opus_builder;
     /* Create opus builder arguments struct. */
-    struct opus_builder_args *p_opus_builder_args = malloc(sizeof(struct opus_builder_args));
+    struct opus_builder_args *p_opus_builder_args = calloc(sizeof(struct opus_builder_args), BYTE);
     p_opus_builder_args->server_status = status;
     p_opus_builder_args->fin = fin;
     p_opus_builder_args->encoder = encoder;
-    p_opus_builder_args->crypto_payload = crypto_payload;
     p_opus_builder_args->opus_frame = client_handler_args.opus_frame;
     p_opus_builder_args->opus_builder_mutex = stream_mode ? &stream_consumer_mutex : &opus_builder_mutex;
     p_opus_builder_args->opus_sender_mutex = &opus_sender_mutex;

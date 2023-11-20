@@ -21,6 +21,8 @@
 #include <raplayer/config.h>
 #include <raplayer/client.h>
 #include <raplayer/chacha20.h>
+#include <raplayer/task_queue.h>
+#include <raplayer/utils.h>
 
 struct stream_info {
     int16_t channels;
@@ -113,7 +115,7 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, const struct ser
 unsigned char *ready_sock_client_seq2(const struct server_socket_info *p_server_socket_info) {
     struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
-    static unsigned char crypto_payload[CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES];
+    unsigned char *crypto_payload = malloc(crypto_payload_size);
 
     if (crypto_payload_size ==
         recvfrom(p_server_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, NULL, NULL)) {
@@ -138,7 +140,8 @@ void *send_heartbeat(void *p_server_socket_info) {
     return EXIT_SUCCESS;
 }
 
-int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void* user_data), void* callback_user_data, int **client_status) {
+int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void *user_data),
+              void *callback_user_data, int **client_status) {
     int err;
     struct stream_info pStreamInfo;
     struct sockaddr_in server_addr;
@@ -167,10 +170,12 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
     **client_status = 0;
     pthread_t heartbeat_sender;
     pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) &server_socket_info); // Activate heartbeat sender.
+    chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
+    unsigned char **calculated_c_bits = malloc(sizeof(void *));
 
     while (1) {
         alarm(1); // reset alarm every second.
-        unsigned char c_bits[DWORD + sizeof(OPUS_FLAG) + FRAME_SIZE];
+        unsigned char c_bits[MAX_DATA_SIZE];
 
         opus_int16 out[FRAME_SIZE * pStreamInfo.channels];
         unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo.channels * WORD];
@@ -182,29 +187,13 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
         }
 
         // Calculate opus frame offset.
-        long unsigned int idx = 0;
-        for (long unsigned int i = 0; i < sizeof(c_bits); i++) { // 'OPUS' indicates for Start of opus stream.
-            if (c_bits[i] == 'O' && c_bits[i + 1] == 'P' && c_bits[i + 2] == 'U' && c_bits[i + 3] == 'S') {
-                idx = i - 1;
-                break;
-            }
-        }
-
-        char str_nbBytes[idx + 2];
-        for (long unsigned int i = 0; i <= idx + 1; i++) {
-            if (i == (idx + 1))
-                str_nbBytes[i] = '\0';
-            else
-                str_nbBytes[i] = (char) c_bits[i];
-        }
-        long nbBytes = strtol(str_nbBytes, NULL, 10);
+        uint64_t nbBytes = provide_20ms_opus_offset_calculator(c_bits, calculated_c_bits);
 
         /* Decrypt the frame. */
-        chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
-        chacha20_xor(&ctx, c_bits + idx + 5, nbBytes);
+        chacha20_xor(&ctx, *calculated_c_bits, nbBytes);
 
         /* Decode the frame. */
-        int frame_size = opus_decode(decoder, (unsigned char *) c_bits + idx + 5, (opus_int32) nbBytes, out,
+        int frame_size = opus_decode(decoder, (unsigned char *) *calculated_c_bits, (opus_int32) nbBytes, out,
                                      FRAME_SIZE, 0);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
@@ -219,6 +208,8 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
         // TODO: implement the client-side time synchronized callback
         frame_callback(pcm_bytes, frame_size, callback_user_data);
     }
+    /* Cleaning up */
+    free(calculated_c_bits);
 
     /* Wait for a joining thread. */
     pthread_join(heartbeat_sender, NULL);

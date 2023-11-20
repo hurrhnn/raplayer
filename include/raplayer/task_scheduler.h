@@ -29,6 +29,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <raplayer/task_queue.h>
+#include <raplayer/chacha20.h>
 
 struct task_scheduler_info {
     int sock_fd;
@@ -44,7 +45,6 @@ struct client_handler_info {
     int *current_clients_count;
     TaskQueue ***recv_queues;
     uint32_t data_len;
-    unsigned char *crypto_payload;
 
     bool *stop_consumer;
     pthread_t *stream_consumer;
