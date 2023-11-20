@@ -37,6 +37,7 @@ struct server_socket_info {
     int *socket_len;
 };
 
+// TODO: make `-1` to error code
 int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p_ctx_server_addr) {
     struct sockaddr_in ctx_server_addr = *p_ctx_server_addr;
     int sock_fd;
@@ -44,7 +45,7 @@ int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p
     // Creating socket file descriptor.
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         fprintf(stdout, "Error: Socket Creation Failed.\n");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     memset((char *) &ctx_server_addr, 0, sizeof(ctx_server_addr));
@@ -56,7 +57,7 @@ int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p
 
     if ((hostent = gethostbyname(server_addr)) == NULL) {
         printf("Error: Connection Cannot resolved to %s.\n", server_addr);
-        exit(EXIT_FAILURE);
+        return -1;
     } else {
         addr_list = (struct in_addr **) hostent->h_addr_list;
         strcpy(server_addr, inet_ntoa(*addr_list[0]));
@@ -64,7 +65,7 @@ int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p
 
     if (!inet_pton(AF_INET, server_addr, &ctx_server_addr.sin_addr)) {
         puts("Error: Convert Internet host address Failed.");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     *p_ctx_server_addr = ctx_server_addr;
@@ -105,7 +106,6 @@ uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, const struct ser
 
         sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
                *p_server_socket_info->socket_len);
-        free(buffer);
         return orig_pcm_size;
     }
     free(buffer);
@@ -174,7 +174,6 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
     unsigned char **calculated_c_bits = malloc(sizeof(void *));
 
     while (1) {
-        alarm(1); // reset alarm every second.
         unsigned char c_bits[MAX_DATA_SIZE];
 
         opus_int16 out[FRAME_SIZE * pStreamInfo.channels];
