@@ -20,68 +20,81 @@
 
 #include <raplayer/task_scheduler.h>
 #include <raplayer/config.h>
+#include <raplayer/utils.h>
 
 _Noreturn void *schedule_task(void *p_task_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-    struct task_scheduler_info *task_scheduler_args = (struct task_scheduler_info *) p_task_scheduler_args;
+    task_scheduler_info_t *task_scheduler_args = (task_scheduler_info_t *) p_task_scheduler_args;
     int sock_fd = task_scheduler_args->sock_fd;
-    int *current_clients_count = task_scheduler_args->current_clients_count;
+    int *client_count = task_scheduler_args->client_count;
 
     while (true) {
-        Task *task = malloc(sizeof(Task));
+        ra_task_t *task = malloc(sizeof(ra_task_t));
+        memset(task, 0x0, sizeof(ra_task_t));
 
-        const struct sockaddr_in *p_client_addr = malloc(sizeof(struct sockaddr));
-        struct sockaddr_in client_addr = *p_client_addr;
-
-        const socklen_t *p_sock_len = malloc(sizeof(socklen_t));
-        socklen_t sock_len = *p_sock_len;
+        struct sockaddr_in client_addr;
+        socklen_t sock_len;
         sock_len = sizeof(client_addr);
 
         task->buffer_len = recvfrom(sock_fd, task->buffer, MAX_DATA_SIZE, 0, (struct sockaddr *) &client_addr,
                                     &sock_len);
 
         int client_id = -1;
-        for (int i = 0; i < *current_clients_count; i++) {
-            if ((strcmp(inet_ntoa(
-                                ((TaskQueue **) task_scheduler_args->recv_queues)[i]->queue_info->client->client_addr.sin_addr),
-                        inet_ntoa(client_addr.sin_addr)) == 0) &&
-                ntohs(((TaskQueue **) task_scheduler_args->recv_queues)[i]->queue_info->client->client_addr.sin_port) ==
-                ntohs(client_addr.sin_port)) {
+        for (int i = 0; i < *client_count; i++) {
+            pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
+            ra_client_t *client = &(*task_scheduler_args->client_context)[i];
+            if ((strcmp(inet_ntoa(client->client_addr.sin_addr), inet_ntoa(client_addr.sin_addr)) == 0) &&
+                ntohs(client->client_addr.sin_port) == ntohs(client_addr.sin_port)) {
                 client_id = i;
+                pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
                 break;
             }
+            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
         }
 
         if (client_id == -1) {
-            (*current_clients_count) += 1;
-
-            printf("\n%02d: Connection from %s:%d\n", *current_clients_count, inet_ntoa(client_addr.sin_addr),
+            (*client_count) += 1;
+            printf("\n%02d: Connection from %s:%d\n", *client_count, inet_ntoa(client_addr.sin_addr),
                    ntohs(client_addr.sin_port));
             fflush(stdout);
 
-            (task_scheduler_args->recv_queues) = realloc(((TaskQueue **) task_scheduler_args->recv_queues),
-                                                         sizeof(TaskQueue *) * (*current_clients_count));
-            ((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1] = malloc(sizeof(TaskQueue));
+            pthread_rwlock_wrlock(task_scheduler_args->client_context_rwlock);
+            *task_scheduler_args->client_context = realloc(*task_scheduler_args->client_context,
+                                                           sizeof(ra_client_t) * (*client_count));
+            memset(*task_scheduler_args->client_context + sizeof(ra_client_t) * ((*client_count) - 1), 0x0,
+                   sizeof(ra_client_t));
+            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 
-            Client *client = malloc(sizeof(Client));
-            client->client_id = *current_clients_count;
+            pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
+            ra_client_t *client = &(*task_scheduler_args->client_context)[(*client_count) - 1];
+            client->sock_fd = sock_fd;
             client->client_addr = client_addr;
             client->socket_len = sock_len;
+            client->client_id = (*client_count) - 1;
+            client->status = 0;
+            client->recv_queue = malloc(sizeof(ra_task_queue_t));
+            client->send_queue = malloc(sizeof(ra_task_queue_t));
 
-            init_queue(sock_fd, client,
-                       ((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1]);
-            append_task(((TaskQueue **) task_scheduler_args->recv_queues)[(*current_clients_count) - 1], task);
+            init_queue(client->recv_queue);
+            init_queue(client->send_queue);
+            append_task(client->recv_queue, task);
+            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 
-            pthread_mutex_lock(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_mutex);
-            pthread_cond_signal(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_cond);
-            pthread_mutex_unlock(((struct task_scheduler_info *) p_task_scheduler_args)->complete_init_queue_mutex);
+            client->status |= RA_CLIENT_INITIATED;
+            pthread_mutex_lock(task_scheduler_args->complete_init_queue_mutex);
+            pthread_cond_signal(task_scheduler_args->complete_init_queue_cond);
+            pthread_mutex_unlock(task_scheduler_args->complete_init_queue_mutex);
         } else {
-            if (!strncmp((char *) task->buffer, HEARTBEAT, sizeof(HEARTBEAT)))
-                ((TaskQueue **) task_scheduler_args->recv_queues)[client_id]->queue_info->heartbeat_status = true;
-            else
-                append_task(((TaskQueue **) task_scheduler_args->recv_queues)[client_id], task);
+            pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
+            ra_client_t *client = &(*task_scheduler_args->client_context)[client_id];
+            if (!strncmp((char *) task->buffer, HEARTBEAT, sizeof(HEARTBEAT))) {
+                client->status |= RA_CLIENT_HEARTBEAT_RECEIVED;
+                free(task);
+            } else
+                append_task(client->recv_queue, task);
+            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
         }
     }
 }

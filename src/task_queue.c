@@ -19,33 +19,41 @@
 */
 
 #include <raplayer/task_queue.h>
+#include <stdio.h>
 
-void init_queue(int sock_fd, Client *client, TaskQueue *q) {
+void init_queue(ra_task_queue_t *q) {
     q->rear = 0;
     q->front = 0;
 
-    q->queue_info = malloc(sizeof(TaskQueueInfo));
-    q->queue_info->sock_fd = sock_fd;
-    q->queue_info->heartbeat_status = false;
-    q->queue_info->client = client;
+    pthread_mutex_init(&q->mutex, NULL);
+    pthread_cond_init(&q->empty, NULL);
+    pthread_cond_init(&q->fill, NULL);
 }
 
-int is_empty(const TaskQueue *q) {
+int is_empty(const ra_task_queue_t *q) {
     return (q->front == q->rear);
 }
 
-int is_full(const TaskQueue *q) {
+int is_full(const ra_task_queue_t *q) {
     return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
 }
 
-bool append_task(TaskQueue *q, Task *task) {
-    if (is_full(q)) { return false; }
+bool append_task(ra_task_queue_t *q, ra_task_t *task) {
+    pthread_mutex_lock(&q->mutex);
+    while (is_full(q)) { pthread_cond_wait(&q->empty, &q->mutex); }
     q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
     q->tasks[q->rear] = task;
+    pthread_cond_signal(&q->fill);
+    pthread_mutex_unlock(&q->mutex);
     return true;
 }
 
-Task *perf_task(TaskQueue *q) {
+ra_task_t *retrieve_task(ra_task_queue_t *q) {
+    pthread_mutex_lock(&q->mutex);
+    while (is_empty(q)) { pthread_cond_wait(&q->fill, &q->mutex); }
     q->front = (q->front + 1) % MAX_QUEUE_SIZE;
-    return q->tasks[q->front];
+    ra_task_t *current_task = q->tasks[q->front];
+    pthread_cond_signal(&q->fill);
+    pthread_mutex_unlock(&q->mutex);
+    return current_task;
 }

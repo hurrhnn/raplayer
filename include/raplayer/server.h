@@ -41,28 +41,42 @@
 #include <raplayer/task_queue.h>
 #include <raplayer/chacha20.h>
 
-struct opus_builder_args {
-    int **server_status;
+typedef struct {
+    int *status, *is_sender_ready, *client_count, *turn, is_stream_mode;
     FILE *fin;
     OpusEncoder *encoder;
 
+    ra_client_t **client_context;
+
     pthread_mutex_t *opus_builder_mutex;
-    pthread_mutex_t *opus_sender_mutex;
-
     pthread_cond_t *opus_builder_cond;
-    pthread_cond_t *opus_sender_cond;
-    Task *opus_frame;
-};
+    pthread_mutex_t *complete_init_client_mutex;
+    pthread_cond_t *complete_init_client_cond;
 
-struct opus_sender_args {
-    int **server_status;
-    TaskQueue *recv_queue;
-    Task *opus_frame;
+    pthread_rwlock_t *client_context_rwlock;
+} opus_builder_args_t;
+
+typedef struct {
+    int *status, client_id;
+    ra_client_t **client_context;
 
     pthread_mutex_t *opus_sender_mutex;
     pthread_cond_t *opus_sender_cond;
-};
 
-int ra_server(int port, int fd, uint32_t len, int** status);
+    pthread_rwlock_t *client_context_rwlock;
+} opus_sender_args_t;
+
+typedef struct {
+    int *status, *turn;
+
+    pthread_mutex_t *opus_builder_mutex;
+    pthread_cond_t *opus_builder_cond;
+    pthread_mutex_t *opus_sender_mutex;
+    pthread_cond_t *opus_sender_cond;
+
+    pthread_rwlock_t *client_context_rwlock;
+} opus_timer_args_t;
+
+int ra_server(int port, int fd, uint32_t len, int *server_status);
 
 #endif
