@@ -16,8 +16,8 @@ option(RAPLAYER_BUILD_DEPS "Try to build core dependencies." ON)
 option(RAPLAYER_DISABLE_APPLICATION "Disable to build raplayer cli application." OFF)
 option(RAPLAYER_INSTALL_PKGCONFIG "install pkg-config module." ON)
 
-set(RAPLAYER_DEP_LIBRARIES "")
-set(RAPLAYER_DEP_INCLUDES "")
+set(RAPLAYER_LIBRARIES "")
+set(RAPLAYER_INCLUDES "")
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     if (CMAKE_C_COMPILER_ID MATCHES "(GNU|Clang)" OR
@@ -90,7 +90,7 @@ add_library(raplayer STATIC ${RAPLAYER_SOURCES})
 endif()
 
 configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
-FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADER "include/*.h")
+FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADERS "include/*.h")
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
@@ -108,7 +108,7 @@ set_target_properties(raplayer
         VERSION
         ${CMAKE_PROJECT_VERSION}
         PUBLIC_HEADER
-        "${RAPLAYER_PUBLIC_HEADER}")
+        "${RAPLAYER_PUBLIC_HEADERS}")
 
 target_include_directories(
         raplayer
