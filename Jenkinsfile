@@ -48,8 +48,7 @@ pipeline {
                                 Test()
                                 dir("release") {
                                     sh 'mv application/main raplayer-linux-x86_64'
-                                    script { zip zipFile: 'raplayer-linux-x86_64.zip', archive: false, glob: '**/*.a, raplayer-linux-x86_64' }
-                                    archiveArtifacts artifacts: 'raplayer-linux-x86_64.zip', fingerprint: true
+                                    archiveArtifacts artifacts: 'raplayer-linux-x86_64', fingerprint: true
                                 }
                             }
                         }
@@ -76,8 +75,7 @@ pipeline {
                                 Test()
                                 dir("release") {
                                     sh 'mv application/main raplayer-mac-x86_64'
-                                    script { zip zipFile: 'raplayer-mac-x86_64.zip', archive: false, glob: '**/*.a, raplayer-mac-x86_64' }
-                                    archiveArtifacts artifacts: 'raplayer-mac-x86_64.zip', fingerprint: true
+                                    archiveArtifacts artifacts: 'raplayer-mac-x86_64', fingerprint: true
                                 }
                             }
                         }
