@@ -12,7 +12,7 @@ void Clean() {
 void Build() {
     checkout scm
     dir("release") {
-        sh 'cmake .. -DCMAKE_BUILD_TYPE=Release'
+        sh 'cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release'
         sh 'make'
     }
 }
@@ -43,12 +43,13 @@ pipeline {
                                 Build()
                             }
                         }
-                        stage('Test on Linux') {
+                        stage('Test & Release on Linux') {
                             steps {
                                 Test()
                                 dir("release") {
                                     sh 'mv application/main raplayer-linux-x86_64'
-                                    archiveArtifacts artifacts: 'raplayer-linux-x86_64', fingerprint: true
+                                    script { zip zipFile: 'raplayer-linux-x86_64.zip', archive: false, glob: '**/*.a, raplayer-linux-x86_64' }
+                                    archiveArtifacts artifacts: 'raplayer-linux-x86_64.zip', fingerprint: true
                                 }
                             }
                         }
@@ -70,12 +71,13 @@ pipeline {
                                 Build()
                             }
                         }
-                        stage('Test on macOS') {
+                        stage('Test & Release on macOS') {
                             steps {
                                 Test()
                                 dir("release") {
                                     sh 'mv application/main raplayer-mac-x86_64'
-                                    archiveArtifacts artifacts: 'raplayer-mac-x86_64', fingerprint: true
+                                    script { zip zipFile: 'raplayer-mac-x86_64.zip', archive: false, glob: '**/*.a, raplayer-mac-x86_64' }
+                                    archiveArtifacts artifacts: 'raplayer-mac-x86_64.zip', fingerprint: true
                                 }
                             }
                         }
@@ -95,31 +97,24 @@ pipeline {
                         stage('Build on Windows') {
                             steps {
                                 dir("release") {
-                                    bat 'cmake .. -DCMAKE_BUILD_TYPE=Release'
+                                    bat 'cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release'
                                     bat 'make'
                                 }
                             }
                         }
-                        stage('Test on Windows') {
+                        stage('Test & Release on Windows') {
                             steps {
                                 dir("release") {
-                                    dir("application") {
-                                        bat 'main.exe'
-                                        bat 'mv main.exe raplayer-win-x86_64.exe'
-                                        archiveArtifacts artifacts: 'raplayer-win-x86_64.exe', fingerprint: true
-                                    }
+                                    bat 'application\\main.exe'
+                                    bat 'move application\\main.exe raplayer-win-x86_64.exe'
+                                    script { zip zipFile: 'raplayer-win-x86_64.zip', archive: false, glob: 'C:\\cygwin64\\bin\\cygwin1.dll, raplayer-win-x86_64.exe' }
+                                    archiveArtifacts artifacts: 'raplayer-win-x86_64.zip', fingerprint: true
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            discordSend description: "```\nresult: " + currentBuild.currentResult + "\n```", link: env.BUILD_URL, result: currentBuild.currentResult, title: JOB_NAME + " #" + env.BUILD_NUMBER, webhookURL: "https://discord.com/api/webhooks/876066631284035605/ocEMWjZmT9eFOFN_7zenbiqIRzFNrk921APCkfCw-yIMUaJLTP4wVt6qMtXNhFPfOroi"
         }
     }
 }
