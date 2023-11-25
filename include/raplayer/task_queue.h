@@ -19,6 +19,7 @@
 */
 #include <stdlib.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <raplayer/config.h>
@@ -28,41 +29,46 @@
 #define RAPLAYER_TASK_QUEUE_H
 
 typedef struct {
-    unsigned int client_id;
-    struct sockaddr_in client_addr;
-    socklen_t socket_len;
-    struct chacha20_context crypto_context;
-} Client;
-
-typedef struct {
     unsigned char buffer[MAX_DATA_SIZE];
     ssize_t buffer_len;
-}Task;
-
-typedef struct {
-    int sock_fd;
-    int heartbeat_status;
-    Client *client;
-
-} TaskQueueInfo;
+} ra_task_t;
 
 typedef struct {
     int front;
     int rear;
 
-    TaskQueueInfo *queue_info;
-    Task *tasks[MAX_QUEUE_SIZE];
+    ra_task_t *tasks[MAX_QUEUE_SIZE];
+    pthread_mutex_t mutex;
+    pthread_cond_t empty, fill;
 
-} TaskQueue;
+} ra_task_queue_t;
 
-void init_queue(int sock_fd, Client *client, TaskQueue *q);
+typedef enum {
+    RA_CLIENT_INITIATED = (1 << 0),
+    RA_CLIENT_HEARTBEAT_RECEIVED = (1 << 1),
+    RA_CLIENT_CONNECTED = (1 << 2)
+} ra_client_status_t;
 
-int is_full(const TaskQueue *q);
+typedef struct {
+    ra_client_status_t status;
+    unsigned int client_id;
+    int sock_fd;
+    struct sockaddr_in client_addr;
+    socklen_t socket_len;
+    struct chacha20_context crypto_context;
 
-int is_empty(const TaskQueue *q);
+    ra_task_queue_t *recv_queue;
+    ra_task_queue_t *send_queue;
+} ra_client_t;
 
-bool append_task(TaskQueue *q, Task *task);
+void init_queue(ra_task_queue_t *q);
 
-Task *perf_task(TaskQueue *q);
+int is_full(const ra_task_queue_t *q);
+
+int is_empty(const ra_task_queue_t *q);
+
+bool append_task(ra_task_queue_t *q, ra_task_t *task);
+
+ra_task_t *retrieve_task(ra_task_queue_t *q);
 
 #endif

@@ -31,23 +31,24 @@
 #include <raplayer/task_queue.h>
 #include <raplayer/chacha20.h>
 
-struct task_scheduler_info {
+typedef struct {
     int sock_fd;
-    int *current_clients_count;
-    TaskQueue **recv_queues;
+    int *client_count;
+    ra_client_t **client_context;
 
     pthread_mutex_t *complete_init_queue_mutex;
     pthread_cond_t *complete_init_queue_cond;
-};
 
-struct client_handler_info {
-    int **server_status;
-    int *current_clients_count;
-    TaskQueue ***recv_queues;
+    pthread_rwlock_t *client_context_rwlock;
+} task_scheduler_info_t;
+
+typedef struct {
+    int *status;
+    int *client_count;
+    ra_client_t **client_context;
+
     uint32_t data_len;
-
-    bool *stop_consumer;
-    pthread_t *stream_consumer;
+    int is_sender_ready;
 
     pthread_mutex_t *complete_init_mutex[2];
     pthread_mutex_t *opus_sender_mutex;
@@ -55,8 +56,8 @@ struct client_handler_info {
     pthread_cond_t *complete_init_cond[2];
     pthread_cond_t *opus_sender_cond;
 
-    Task *opus_frame;
-};
+    pthread_rwlock_t *client_context_rwlock;
+} client_handler_args_t;
 
 _Noreturn void *schedule_task(void *p_task_scheduler_args);
 
