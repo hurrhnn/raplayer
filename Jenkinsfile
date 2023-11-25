@@ -105,7 +105,8 @@ pipeline {
                                 dir("release") {
                                     bat 'application\\main.exe'
                                     bat 'move application\\main.exe raplayer-win-x86_64.exe'
-                                    script { zip zipFile: 'raplayer-win-x86_64.zip', archive: false, glob: 'C:\\cygwin64\\bin\\cygwin1.dll, raplayer-win-x86_64.exe' }
+                                    bat 'copy C:\\cygwin64\\bin\\cygwin1.dll cygwin1.dll'
+                                    script { zip zipFile: 'raplayer-win-x86_64.zip', archive: false, glob: 'cygwin1.dll, raplayer-win-x86_64.exe' }
                                     archiveArtifacts artifacts: 'raplayer-win-x86_64.zip', fingerprint: true
                                 }
                             }
