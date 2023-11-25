@@ -93,7 +93,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
                         break;
     }
 
-    strcpy(pPcm->pcmDataChunk.chunk_id, tmpBytes);
+    memcpy(pPcm->pcmDataChunk.chunk_id, "data", DWORD);
     fread(&pPcm->pcmDataChunk.chunk_size, DWORD, 1, fin);
 
     fgetpos(fin, before_data_pos); // Save begin of pcm data position.
@@ -281,7 +281,7 @@ void *control_volume(void *p_callback_user_data_args) {
     return NULL;
 }
 
-// FIXME: need to implement rhe server-side event callback handler
+// FIXME: need to implement the server-side event callback handler
 //void server_signal_timer(int signal) {
 //    if (signal == SIGALRM) {
 //        write(STDOUT_FILENO, "\nAll of client has been interrupted raplayer. Program now Exit.\n\r", 65);
@@ -314,18 +314,11 @@ void client_frame_callback(void *frame, int frame_size, void* user_args) {
     Pa_WriteStream(callback_user_data_args[6], frame, frame_size);
 
     (*sum_frame_cnt)++;
-    (*sum_frame_size) += frame_size;
+    (*sum_frame_size) += frame_size * WORD * OPUS_AUDIO_CH;
 }
 
 int main(int argc, char **argv) {
-    fclose(stderr); // Close stderr to avoid show alsa-lib error spamming.
-    status = malloc(sizeof(void *));
-    int err = Pa_Initialize();
-
-    if (err != paNoError) {
-        printf("PortAudio error: %s\n", Pa_GetErrorText(err));
-        return EXIT_FAILURE;
-    }
+    status = malloc(sizeof(int));
 
     if (argc < 2 ? true : !strcmp(argv[1], "--client") ? false : !strcmp(argv[1], "--server") ? false : true)
         print_usage(argv);
@@ -347,6 +340,15 @@ int main(int argc, char **argv) {
 
         *status = -1;
         signal(SIGALRM, client_signal_timer);
+
+        fclose(stderr); // Close stderr to avoid show alsa-lib error spamming.
+        int err = Pa_Initialize();
+
+        if (err != paNoError) {
+            printf("PortAudio error: %s\n", Pa_GetErrorText(err));
+            return EXIT_FAILURE;
+        }
+
         PaStreamParameters outputParameters;
         PaStream *stream;
 
@@ -396,7 +398,7 @@ int main(int argc, char **argv) {
         Pa_StartStream(stream);
         pthread_create(&info_printer, NULL, print_info, p_callback_user_data_args); // Activate info printer.
         pthread_create(&volume_controller, NULL, control_volume, p_callback_user_data_args); // Activate volume controller.
-        ra_client(argv[2], port, client_frame_callback, p_callback_user_data_args, &status);
+        ra_client(argv[2], port, client_frame_callback, p_callback_user_data_args, status);
 
         pthread_join(info_printer, NULL);
         pthread_join(volume_controller, NULL);
@@ -489,7 +491,8 @@ int main(int argc, char **argv) {
             fsetpos(fin, &before_data_pos); // Re-read pcm data bytes from stream.
 
 //        signal(SIGALRM, &server_signal_timer);
-        ra_server(port, fileno(fin), pcm_struct->pcmDataChunk.chunk_size, &status);
+        *status = 0;
+        ra_server(port, fileno(fin), pcm_struct->pcmDataChunk.chunk_size, status);
     }
     return EXIT_SUCCESS;
 }

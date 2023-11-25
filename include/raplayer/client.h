@@ -36,6 +36,6 @@
 #ifndef RAPLAYER_RA_CLIENT_H
 #define RAPLAYER_RA_CLIENT_H
 
-int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void* user_data), void* callback_user_data, int**client_status);
+int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void* user_data), void* callback_user_data, int *client_status);
 
 #endif

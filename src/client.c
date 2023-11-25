@@ -31,7 +31,7 @@ struct stream_info {
 };
 
 struct server_socket_info {
-    int **client_status;
+    int *client_status;
     int sock_fd;
     struct sockaddr_in *server_addr;
     int *socket_len;
@@ -127,21 +127,21 @@ unsigned char *ready_sock_client_seq2(const struct server_socket_info *p_server_
 }
 
 void *send_heartbeat(void *p_server_socket_info) {
-    while (!**((struct server_socket_info *) p_server_socket_info)->client_status) {
+    struct timespec timespec;
+    timespec.tv_sec = 0;
+    timespec.tv_nsec = 250000000;
+
+    while (!*((struct server_socket_info *) p_server_socket_info)->client_status) {
         sendto(((struct server_socket_info *) p_server_socket_info)->sock_fd, HEARTBEAT, sizeof(HEARTBEAT), 0,
                (struct sockaddr *) ((struct server_socket_info *) p_server_socket_info)->server_addr,
                *((struct server_socket_info *) p_server_socket_info)->socket_len);
-
-        struct timespec timespec;
-        timespec.tv_sec = 0;
-        timespec.tv_nsec = 250000000;
         nanosleep(&timespec, NULL);
     }
     return EXIT_SUCCESS;
 }
 
 int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void *user_data),
-              void *callback_user_data, int **client_status) {
+              void *callback_user_data, int *client_status) {
     int err;
     struct stream_info pStreamInfo;
     struct sockaddr_in server_addr;
@@ -167,7 +167,7 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
         return EXIT_FAILURE;
     }
 
-    **client_status = 0;
+    *client_status = 0;
     pthread_t heartbeat_sender;
     pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) &server_socket_info); // Activate heartbeat sender.
     chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
@@ -180,8 +180,8 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
         unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo.channels * WORD];
 
         recvfrom(sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
-        if (**client_status || (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S')) { // Detect End of Stream.
-            **client_status = 1;
+        if (*client_status || (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S')) { // Detect End of Stream.
+            *client_status = 1;
             break;
         }
 
@@ -207,7 +207,7 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
         // TODO: implement the client-side time synchronized callback
         frame_callback(pcm_bytes, frame_size, callback_user_data);
     }
-    /* Cleaning up */
+    /* Cleaning up. */
     free(calculated_c_bits);
 
     /* Wait for a joining thread. */
