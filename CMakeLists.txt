@@ -94,8 +94,9 @@ FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADERS "include/*.h")
 
 list(APPEND RAPLAYER_LIBRARIES m)
 list(APPEND RAPLAYER_LIBRARIES dl)
+if (NOT CMAKE_SYSTEM_NAME MATCHES "Android")
 list(APPEND RAPLAYER_LIBRARIES pthread)
-
+endif()
 target_link_libraries(raplayer ${RAPLAYER_LIBRARIES})
 
 set_target_properties(raplayer
