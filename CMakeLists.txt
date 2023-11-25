@@ -92,15 +92,11 @@ endif()
 configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
 FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADERS "include/*.h")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
-elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} m dl pthread) # asound
-elseif (CYGWIN)
-    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} rt winmm m dl pthread)
-else ()
-    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES})
-endif ()
+list(APPEND RAPLAYER_LIBRARIES m)
+list(APPEND RAPLAYER_LIBRARIES dl)
+list(APPEND RAPLAYER_LIBRARIES pthread)
+
+target_link_libraries(raplayer ${RAPLAYER_LIBRARIES})
 
 set_target_properties(raplayer
         PROPERTIES SOVERSION
