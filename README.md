@@ -21,17 +21,18 @@ MacOS: `cmake make gcc`<br>
 Optional packages: `libopus portaudio`
 
 ### Building
-run `build.sh` or configure cmake manually, cmake will automatically build the optional packages and build the source.
+run `build.sh` to build, or configure cmake manually. cmake will automatically build optional packages and build the source.
 
 #### Cmake Options
+`-DBUILD_SHARED_LIBS`, Build using shared libraries.<br>
 `-DRAPLAYER_BUILD_DEPS`, Try to build core dependencies.<br>
 `-DRAPLAYER_DISABLE_APPLICATION`, Disable to build raplayer cli application.<br>
 `-DRAPLAYER_INSTALL_PKGCONFIG`, install pkg-config module.
 
-## Running the CLI application
+## Running CLI application
 
-`server` mode is an audio provider mode, `client` mode is an audio player mode. <br>
-The raplayer can running `server`, `client` mode with one executable file.
+The `server` mode is audio provider mode, `client` mode is audio player mode. <br>
+raplayer can run `server`, `client` mode with one executable.
 
 ```bash
 $ ./main
@@ -69,7 +70,7 @@ Usage: ./main --client <Server Address> [Port]
 
 ### Usage examples
 
-- Play the pcm_16le file.
+- Play pcm_16le wav file.
 ```bash
 ./main --server s16le.pcm
 ```
@@ -79,12 +80,12 @@ Usage: ./main --client <Server Address> [Port]
 ffmpeg -loglevel panic -i audio.mp3 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./main --server -
 ```
 
-- Play youtube audio using `ffmpeg` & `youtube-dl`
+- Play youtube audio using `ffmpeg` & `yt-dlp`.
 ```bash
 yt-dlp --quiet -f bestaudio "[Youtube URL]" -o - | ffmpeg -loglevel panic -i pipe: -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./main --server -
 ```
 
-- Play audio stream using ffmpeg.
+- Play audio stream using `ffmpeg`.
 ```bash
 ffmpeg -loglevel panic -i http://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8 -f s16le -ac 2 -ar 48000 -acodec pcm_s16le - | ./main --server --stream -
 ```

@@ -11,6 +11,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -O2")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -O0 -g")
 
+option(BUILD_SHARED_LIBS "Build using shared libraries." ON)
 option(RAPLAYER_BUILD_DEPS "Try to build core dependencies." ON)
 option(RAPLAYER_DISABLE_APPLICATION "Disable to build raplayer cli application." OFF)
 option(RAPLAYER_INSTALL_PKGCONFIG "install pkg-config module." ON)
@@ -39,7 +40,7 @@ endif()
 if (CMAKE_SYSTEM_NAME MATCHES "Android")
     file(TO_CMAKE_PATH "${CMAKE_MAKE_PROGRAM}" CMAKE_MAKE_PROGRAM)
     set(CMAKE_C_LIBRARY_ARCHITECTURE ${ANDROID_TOOLCHAIN_NAME})
-    set(RAPLAYER_DEP_CMAKE_ARGS
+    set(RAPLAYER_CMAKE_ARGS
             -DANDROID_ABI:STRING=${ANDROID_ABI}
             -DANDROID_NATIVE_API_LEVEL:STRING=${ANDROID_NATIVE_API_LEVEL}
             -DANDROID_NDK:STRING=${ANDROID_NDK}
@@ -61,7 +62,7 @@ if(RAPLAYER_BUILD_DEPS)
     execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
     execute_process(COMMAND ${CMAKE_COMMAND} --build . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/submodules/libopus)
 
-    find_library(OPUS_SHARED_LIBRARIES NAMES "opus" HINTS ${CMAKE_CURRENT_BINARY_DIR}/install/lib ${CMAKE_CURRENT_BINARY_DIR}/install/lib64
+    find_library(OPUS_BUILDED_LIBRARIES NAMES "opus" HINTS ${CMAKE_CURRENT_BINARY_DIR}/install/lib ${CMAKE_CURRENT_BINARY_DIR}/install/lib64
             REQUIRED
             NO_DEFAULT_PATH
             NO_PACKAGE_ROOT_PATH
@@ -72,27 +73,33 @@ if(RAPLAYER_BUILD_DEPS)
             NO_CMAKE_INSTALL_PREFIX
             CMAKE_FIND_ROOT_PATH_BOTH)
 
-    list(APPEND RAPLAYER_DEP_LIBRARIES ${OPUS_SHARED_LIBRARIES})
-    list(APPEND RAPLAYER_DEP_INCLUDES ${CMAKE_CURRENT_BINARY_DIR}/install/include)
+    list(APPEND RAPLAYER_LIBRARIES ${OPUS_BUILDED_LIBRARIES})
+    list(APPEND RAPLAYER_INCLUDES ${CMAKE_CURRENT_BINARY_DIR}/install/include)
 else()
     find_package(LibOpus REQUIRED)
 
-    list(APPEND RAPLAYER_DEP_LIBRARIES ${OPUS_LIBRARIES})
-    list(APPEND RAPLAYER_DEP_INCLUDES ${OPUS_INCLUDE_DIRS})
+    list(APPEND RAPLAYER_LIBRARIES ${OPUS_LIBRARIES})
+    list(APPEND RAPLAYER_INCLUDES ${OPUS_INCLUDE_DIRS})
+endif()
+
+FILE(GLOB_RECURSE RAPLAYER_SOURCES "src/*.c")
+if(BUILD_SHARED_LIBS)
+add_library(raplayer SHARED ${RAPLAYER_SOURCES})
+else()
+add_library(raplayer STATIC ${RAPLAYER_SOURCES})
 endif()
 
 configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
 FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADER "include/*.h")
-add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_scheduler.c src/task_queue.c src/utils.c)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
+    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread) # asound
+    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} m dl pthread) # asound
 elseif (CYGWIN)
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} rt winmm m dl pthread)
+    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES} rt winmm m dl pthread)
 else ()
-    target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES})
+    target_link_libraries(raplayer ${RAPLAYER_LIBRARIES})
 endif ()
 
 set_target_properties(raplayer
@@ -108,7 +115,7 @@ target_include_directories(
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/raplayer>
-        ${RAPLAYER_DEP_INCLUDES})
+        ${RAPLAYER_INCLUDES})
 
 install(TARGETS raplayer
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
