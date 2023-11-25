@@ -7,9 +7,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -O2")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -g")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -O0 -g")
 
 option(RAPLAYER_BUILD_DEPS "Try to build core dependencies." ON)
 option(RAPLAYER_DISABLE_APPLICATION "Disable to build raplayer cli application." OFF)
@@ -37,6 +37,7 @@ if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
 endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Android")
+    file(TO_CMAKE_PATH "${CMAKE_MAKE_PROGRAM}" CMAKE_MAKE_PROGRAM)
     set(CMAKE_C_LIBRARY_ARCHITECTURE ${ANDROID_TOOLCHAIN_NAME})
     set(RAPLAYER_DEP_CMAKE_ARGS
             -DANDROID_ABI:STRING=${ANDROID_ABI}
@@ -82,9 +83,7 @@ endif()
 
 configure_file(${PROJECT_SOURCE_DIR}/include/raplayer/config.h.in ${PROJECT_SOURCE_DIR}/include/raplayer/config.h)
 FILE(GLOB_RECURSE RAPLAYER_PUBLIC_HEADER "include/*.h")
-add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_scheduler.c src/task_dispatcher.c
-        src/task_queue.c
-        src/utils.c)
+add_library(raplayer SHARED src/client.c src/server.c src/chacha20.c src/task_scheduler.c src/task_queue.c src/utils.c)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(raplayer ${RAPLAYER_DEP_LIBRARIES} m dl pthread ${CoreServices.framework} ${CoreFoundation.framework} ${AudioUnit.framework} ${AudioToolbox.framework} ${CoreAudio.framework})

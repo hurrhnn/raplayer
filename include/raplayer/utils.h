@@ -3,6 +3,7 @@
 
 #include <raplayer/config.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #ifdef __ANDROID__
 #ifndef RAPLAYER_ANDROID_WORKAROUND
@@ -21,6 +22,6 @@
 #endif
 #endif /* __ANDROID__ */
 
-uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char** result);
+uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result);
 
 #endif //RAPLAYER_UTILS_H

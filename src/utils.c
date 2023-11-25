@@ -1,6 +1,6 @@
 #include <raplayer/utils.h>
 
-uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char** result) {
+uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result) {
     long unsigned int idx = 0;
     for (long unsigned int i = 0; i < MAX_DATA_SIZE; i++) { // 'OPUS' indicates for Start of opus stream.
         if (c_bits[i] == 'O' && c_bits[i + 1] == 'P' && c_bits[i + 2] == 'U' && c_bits[i + 3] == 'S') {
