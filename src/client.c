@@ -60,15 +60,17 @@ int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p
         return -1;
     } else {
         addr_list = (struct in_addr **) hostent->h_addr_list;
+        server_addr = malloc(0x100);
         strcpy(server_addr, inet_ntoa(*addr_list[0]));
-    }
 
-    if (!inet_pton(AF_INET, server_addr, &ctx_server_addr.sin_addr)) {
-        puts("Error: Convert Internet host address Failed.");
-        return -1;
+        if (!inet_pton(AF_INET, server_addr, &ctx_server_addr.sin_addr)) {
+            puts("Error: Convert Internet host address Failed.");
+            return -1;
+        }
     }
 
     *p_ctx_server_addr = ctx_server_addr;
+    free(server_addr);
     return sock_fd;
 }
 
