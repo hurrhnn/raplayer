@@ -142,12 +142,12 @@ int getch() {
 
 void *pthread_receive_signal(void *p_pthread_signal_args) {
     void **callback_user_data_args = p_pthread_signal_args;
-    int **is_client_eos = (int **) callback_user_data_args[0];
+    int *is_client_eos = (int *) callback_user_data_args[0];
     pthread_cond_t *p_cond = (pthread_cond_t *) callback_user_data_args[1];
     pthread_mutex_t *p_mutex = (pthread_mutex_t *) callback_user_data_args[2];
     int *pthread_status = (int *) callback_user_data_args[3];
 
-    while ((**is_client_eos) == -1 || !(**is_client_eos)) {
+    while ((*is_client_eos) == -1 || !(*is_client_eos)) {
         pthread_mutex_lock(p_mutex);
         pthread_cond_wait(p_cond, p_mutex);
         *pthread_status = 1;
@@ -159,12 +159,12 @@ void *pthread_receive_signal(void *p_pthread_signal_args) {
 
 void *change_symbol(void *p_symbol_args) {
     void **callback_user_data_args = p_symbol_args;
-    int **is_client_eos = (int **) callback_user_data_args[0];
+    int *is_client_eos = (int *) callback_user_data_args[0];
     char *symbol = (char *) callback_user_data_args[1];
 
     int symbol_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
-    while ((**is_client_eos) == -1 || !(**is_client_eos)) {
+    while ((*is_client_eos) == -1 || !(*is_client_eos)) {
         *((char *) symbol) = symbols[symbol_cnt++ % DWORD];
 
         struct timespec timespec;
@@ -177,7 +177,7 @@ void *change_symbol(void *p_symbol_args) {
 
 void *print_info(void *p_callback_user_data_args) {
     void **callback_user_data_args = p_callback_user_data_args;
-    int **is_client_eos = (int **) callback_user_data_args[0];
+    int *is_client_eos = (int *) callback_user_data_args[0];
     const double *volume = (double *) callback_user_data_args[1];
     uint64_t *sum_frame_cnt = (uint64_t *) callback_user_data_args[2];
     uint64_t *sum_frame_size = (uint64_t *) callback_user_data_args[3];
@@ -203,11 +203,11 @@ void *print_info(void *p_callback_user_data_args) {
     pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, p_pthread_signal_args);
     pthread_create(&symbol_changer, NULL, change_symbol, p_symbol_args);
 
-    while ((**is_client_eos) == -1);
+    while ((*is_client_eos) == -1);
     printf("Preparing socket sequence has been Successfully Completed.");
     printf("\n\rStarted Playing Opus Packets...\n\n\r");
 
-    while (!(**is_client_eos)) {
+    while (!(*is_client_eos)) {
         if (volume_status) {
             volume_status = 0;
             print_volume_remain_cnt = 20;
@@ -245,11 +245,11 @@ void *print_info(void *p_callback_user_data_args) {
 
 void *control_volume(void *p_callback_user_data_args) {
     void **callback_user_data_args = p_callback_user_data_args;
-    int **is_client_eos = (int **) callback_user_data_args[0];
+    int *is_client_eos = (int *) callback_user_data_args[0];
     double *volume = (double *) callback_user_data_args[1];
     pthread_cond_t *print_volume_cond = (pthread_cond_t *) callback_user_data_args[4];
 
-    while ((**is_client_eos) == -1 || !(**is_client_eos)) {
+    while ((*is_client_eos) == -1 || !(*is_client_eos)) {
         if (kbhit()) {
             switch (getch()) {
                 case '\033':
@@ -270,7 +270,7 @@ void *control_volume(void *p_callback_user_data_args) {
 
                 case 0x03:
                 case 0x1A:
-                    **is_client_eos = 1;
+                    *is_client_eos = 1;
                     break;
 
                 default:
@@ -368,7 +368,7 @@ int main(int argc, char **argv) {
         pthread_mutex_t print_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 
         void **p_callback_user_data_args = calloc(sizeof(void *), DWORD * 2);
-        p_callback_user_data_args[0] = &status;
+        p_callback_user_data_args[0] = status;
         p_callback_user_data_args[1] = &volume;
         p_callback_user_data_args[2] = &sum_frame_cnt;
         p_callback_user_data_args[3] = &sum_frame_size;
