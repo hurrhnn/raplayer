@@ -135,7 +135,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
     opus_int16 in[FRAME_SIZE * OPUS_AUDIO_CH];
     unsigned char c_bits[FRAME_SIZE]; // TODO: need to change for correspond adaptive latency
 
-    /* wait consume for client connection if we are stream mode. */
+    /* wait consume for client connection if we are not stream mode. */
     if (!opus_builder_args->is_stream_mode) {
         pthread_mutex_lock(opus_builder_args->complete_init_client_mutex);
         pthread_cond_wait(opus_builder_args->complete_init_client_cond, opus_builder_args->complete_init_client_mutex);
@@ -173,7 +173,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         if (nbBytes < 0) {
             printf("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
             *opus_builder_args->status = true;
-            return NULL;
+            break;
         }
 
         /* Create payload. */
@@ -192,7 +192,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
                 memset(opus_frame, 0x0, sizeof(ra_task_t));
                 opus_frame->buffer_len = (ssize_t) (nbBytes_len + sizeof(OPUS_FLAG) - 1 + nbBytes);
                 memcpy(opus_frame->buffer, buffer, opus_frame->buffer_len);
-                chacha20_xor(&(*client).crypto_context, opus_frame->buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1,
+                chacha20_xor(&client->crypto_context, opus_frame->buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1,
                              nbBytes);
 
                 /* Enqueue the payload. */
@@ -221,18 +221,25 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
             sendto(client->sock_fd, opus_frame->buffer,
                    opus_frame->buffer_len, 0, (struct sockaddr *) &client->client_addr, client->socket_len);
             pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
+            pthread_rwlock_unlock(opus_sender_args->client_context_rwlock);
             free(opus_frame);
         } else {
             pthread_rwlock_unlock(opus_sender_args->client_context_rwlock);
             break;
         }
-        pthread_rwlock_unlock(opus_sender_args->client_context_rwlock);
     }
     return NULL;
 }
 
 void *provide_20ms_opus_timer(void *p_opus_timer_args) {
     opus_timer_args_t *opus_timer_args = (opus_timer_args_t *) p_opus_timer_args;
+
+    /* wait consume for client connection if we are not stream mode. */
+    if (!opus_timer_args->is_stream_mode) {
+        pthread_mutex_lock(opus_timer_args->complete_init_client_mutex);
+        pthread_cond_wait(opus_timer_args->complete_init_client_cond, opus_timer_args->complete_init_client_mutex);
+        pthread_mutex_unlock(opus_timer_args->complete_init_client_mutex);
+    }
 
     struct timespec start_timespec;
     clock_gettime(CLOCK_MONOTONIC, &start_timespec);
@@ -347,7 +354,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         fflush(stdout);
 
         pthread_mutex_lock(complete_init_client_mutex);
-        pthread_cond_signal(complete_init_client_cond);
+        pthread_cond_broadcast(complete_init_client_cond);
         pthread_mutex_unlock(complete_init_client_mutex);
 
         pthread_t opus_sender;
@@ -480,10 +487,13 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
     opus_timer_args_t *p_opus_timer_args = malloc(sizeof(opus_timer_args_t));
     p_opus_timer_args->status = status;
     p_opus_timer_args->turn = p_opus_builder_args->turn;
+    p_opus_timer_args->is_stream_mode = p_opus_builder_args->is_stream_mode;
     p_opus_timer_args->opus_builder_mutex = &opus_builder_mutex;
     p_opus_timer_args->opus_builder_cond = &opus_builder_cond;
     p_opus_timer_args->opus_sender_mutex = &opus_sender_mutex;
     p_opus_timer_args->opus_sender_cond = &opus_sender_cond;
+    p_opus_timer_args->complete_init_client_mutex = &complete_init_client_mutex;
+    p_opus_timer_args->complete_init_client_cond = &complete_init_client_cond;
 
     // activate opus timer & builder.
     pthread_create(&opus_builder, NULL, provide_20ms_opus_builder, (void *) p_opus_builder_args);

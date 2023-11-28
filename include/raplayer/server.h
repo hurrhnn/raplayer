@@ -67,12 +67,14 @@ typedef struct {
 } opus_sender_args_t;
 
 typedef struct {
-    int *status, *turn;
+    int *status, *turn, is_stream_mode;
 
     pthread_mutex_t *opus_builder_mutex;
     pthread_cond_t *opus_builder_cond;
     pthread_mutex_t *opus_sender_mutex;
     pthread_cond_t *opus_sender_cond;
+    pthread_mutex_t *complete_init_client_mutex;
+    pthread_cond_t *complete_init_client_cond;
 
     pthread_rwlock_t *client_context_rwlock;
 } opus_timer_args_t;
