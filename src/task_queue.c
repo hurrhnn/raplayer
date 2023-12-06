@@ -19,7 +19,6 @@
 */
 
 #include <raplayer/task_queue.h>
-#include <stdio.h>
 
 void init_queue(ra_task_queue_t *q) {
     q->rear = 0;
@@ -36,6 +35,13 @@ int is_empty(const ra_task_queue_t *q) {
 
 int is_full(const ra_task_queue_t *q) {
     return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
+}
+
+ra_task_t* create_task(uint32_t len) {
+    ra_task_t *task = malloc(sizeof(ra_task_t));
+    task->data = malloc(len);
+    task->data_len = len;
+    return task;
 }
 
 bool append_task(ra_task_queue_t *q, ra_task_t *task) {
@@ -56,4 +62,9 @@ ra_task_t *retrieve_task(ra_task_queue_t *q) {
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);
     return current_task;
+}
+
+void remove_task(ra_task_t *task) {
+    free(task->data);
+    free(task);
 }

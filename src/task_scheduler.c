@@ -18,9 +18,9 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <raplayer/task_scheduler.h>
 #include <raplayer/config.h>
-#include <raplayer/utils.h>
+#include <raplayer/task_scheduler.h>
+#include <raplayer/task_queue.h>
 
 _Noreturn void *schedule_task(void *p_task_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -31,22 +31,22 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
     int *client_count = task_scheduler_args->client_count;
 
     while (true) {
-        ra_task_t *task = malloc(sizeof(ra_task_t));
-        memset(task, 0x0, sizeof(ra_task_t));
+        ra_task_t *task = create_task(MAX_DATA_SIZE);
+        memset(task->data, 0x0, task->data_len);
 
         struct sockaddr_in client_addr;
         socklen_t sock_len;
         sock_len = sizeof(client_addr);
 
-        task->buffer_len = recvfrom(sock_fd, task->buffer, MAX_DATA_SIZE, 0, (struct sockaddr *) &client_addr,
-                                    &sock_len);
+        task->data_len = recvfrom(sock_fd, task->data, MAX_DATA_SIZE, 0, (struct sockaddr *) &client_addr,
+                                  &sock_len);
 
         int client_id = -1;
         for (int i = 0; i < *client_count; i++) {
             pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
-            ra_client_t *client = &(*task_scheduler_args->client_context)[i];
-            if ((strcmp(inet_ntoa(client->client_addr.sin_addr), inet_ntoa(client_addr.sin_addr)) == 0) &&
-                ntohs(client->client_addr.sin_port) == ntohs(client_addr.sin_port)) {
+            ra_node_t *node = &(*task_scheduler_args->client_context)[i];
+            if ((strcmp(inet_ntoa(node->node_addr.sin_addr), inet_ntoa(client_addr.sin_addr)) == 0) &&
+                ntohs(node->node_addr.sin_port) == ntohs(client_addr.sin_port)) {
                 client_id = i;
                 pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
                 break;
@@ -62,38 +62,38 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
 
             pthread_rwlock_wrlock(task_scheduler_args->client_context_rwlock);
             *task_scheduler_args->client_context = realloc(*task_scheduler_args->client_context,
-                                                           sizeof(ra_client_t) * (*client_count));
-            memset(*task_scheduler_args->client_context + sizeof(ra_client_t) * ((*client_count) - 1), 0x0,
-                   sizeof(ra_client_t));
+                                                           sizeof(ra_node_t) * (*client_count));
+            memset(*task_scheduler_args->client_context + sizeof(ra_node_t) * ((*client_count) - 1), 0x0,
+                   sizeof(ra_node_t));
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 
             pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
-            ra_client_t *client = &(*task_scheduler_args->client_context)[(*client_count) - 1];
-            client->sock_fd = sock_fd;
-            client->client_addr = client_addr;
-            client->socket_len = sock_len;
-            client->client_id = (*client_count) - 1;
-            client->status = 0;
-            client->recv_queue = malloc(sizeof(ra_task_queue_t));
-            client->send_queue = malloc(sizeof(ra_task_queue_t));
+            ra_node_t *node = &(*task_scheduler_args->client_context)[(*client_count) - 1];
+            node->sock_fd = sock_fd;
+            node->node_addr = client_addr;
+            node->socket_len = sock_len;
+            node->node_id = (*client_count) - 1;
+            node->status = 0;
+            node->recv_queue = malloc(sizeof(ra_task_queue_t));
+            node->send_queue = malloc(sizeof(ra_task_queue_t));
 
-            init_queue(client->recv_queue);
-            init_queue(client->send_queue);
-            append_task(client->recv_queue, task);
+            init_queue(node->recv_queue);
+            init_queue(node->send_queue);
+            append_task(node->recv_queue, task);
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 
-            client->status |= RA_CLIENT_INITIATED;
+            node->status |= RA_NODE_INITIATED;
             pthread_mutex_lock(task_scheduler_args->complete_init_queue_mutex);
             pthread_cond_signal(task_scheduler_args->complete_init_queue_cond);
             pthread_mutex_unlock(task_scheduler_args->complete_init_queue_mutex);
         } else {
             pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
-            ra_client_t *client = &(*task_scheduler_args->client_context)[client_id];
-            if (!strncmp((char *) task->buffer, HEARTBEAT, sizeof(HEARTBEAT))) {
-                client->status |= RA_CLIENT_HEARTBEAT_RECEIVED;
-                free(task);
+            ra_node_t *node = &(*task_scheduler_args->client_context)[client_id];
+            if (!strncmp((char *) task->data, HEARTBEAT, sizeof(HEARTBEAT))) {
+                node->status |= RA_NODE_HEARTBEAT_RECEIVED;
+                remove_task(task);
             } else
-                append_task(client->recv_queue, task);
+                append_task(node->recv_queue, task);
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
         }
     }

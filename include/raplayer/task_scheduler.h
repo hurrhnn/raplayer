@@ -34,7 +34,7 @@
 typedef struct {
     int sock_fd;
     int *client_count;
-    ra_client_t **client_context;
+    ra_node_t **client_context;
 
     pthread_mutex_t *complete_init_queue_mutex;
     pthread_cond_t *complete_init_queue_cond;
@@ -45,7 +45,7 @@ typedef struct {
 typedef struct {
     int *status;
     int *client_count;
-    ra_client_t **client_context;
+    ra_node_t **client_context;
 
     uint32_t data_len;
     int is_sender_ready;

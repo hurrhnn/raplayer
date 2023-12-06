@@ -29,8 +29,8 @@
 #define RAPLAYER_TASK_QUEUE_H
 
 typedef struct {
-    unsigned char buffer[MAX_DATA_SIZE];
-    ssize_t buffer_len;
+    void *data;
+    uint32_t data_len;
 } ra_task_t;
 
 typedef struct {
@@ -44,22 +44,22 @@ typedef struct {
 } ra_task_queue_t;
 
 typedef enum {
-    RA_CLIENT_INITIATED = (1 << 0),
-    RA_CLIENT_HEARTBEAT_RECEIVED = (1 << 1),
-    RA_CLIENT_CONNECTED = (1 << 2)
-} ra_client_status_t;
+    RA_NODE_INITIATED = (1 << 0),
+    RA_NODE_HEARTBEAT_RECEIVED = (1 << 1),
+    RA_NODE_CONNECTED = (1 << 2)
+} ra_node_status_t;
 
 typedef struct {
-    ra_client_status_t status;
-    unsigned int client_id;
+    ra_node_status_t status;
+    uint64_t node_id;
     int sock_fd;
-    struct sockaddr_in client_addr;
+    struct sockaddr_in node_addr;
     socklen_t socket_len;
     struct chacha20_context crypto_context;
 
     ra_task_queue_t *recv_queue;
     ra_task_queue_t *send_queue;
-} ra_client_t;
+} ra_node_t;
 
 void init_queue(ra_task_queue_t *q);
 
@@ -70,5 +70,9 @@ int is_empty(const ra_task_queue_t *q);
 bool append_task(ra_task_queue_t *q, ra_task_t *task);
 
 ra_task_t *retrieve_task(ra_task_queue_t *q);
+
+ra_task_t* create_task(uint32_t len);
+
+void remove_task(ra_task_t *task);
 
 #endif
