@@ -1,5 +1,4 @@
 #include <raplayer/utils.h>
-#include <raplayer/client.h>
 
 const char *raplayer_strerror(int err) {
     switch (err) {
@@ -9,10 +8,31 @@ const char *raplayer_strerror(int err) {
             return "Connection Cannot resolved to address";
         case RA_CLIENT_ADDRESS_CONVERSION_FAILED:
             return "Convert internet host address Failed";
+        case RA_CLIENT_SOCKET_INIT_SEQ1_FAILED:
+            return "Client socket initiating sequence 1 Failed";
+        case RA_CLIENT_SOCKET_INIT_SEQ2_FAILED:
+            return "Client socket initiating sequence 2 Failed";
+        case RA_CLIENT_CREATE_OPUS_DECODER_FAILED:
+            return "Failed to create opus decoder";
+        case RA_CLIENT_OPUS_DECODE_FAILED:
+            return "Opus decoder failed to operate";
+        case RA_SERVER_SOCKET_BIND_FAILED:
+            return "Socket bind Failed";
+        case RA_SERVER_SOCKET_INIT_SEQ1_FAILED:
+            return "Incoming connection socket initiating sequence 1 Failed";
+        case RA_SERVER_SOCKET_INIT_SEQ2_FAILED:
+            return "Incoming connection socket initiating sequence 2 Failed";
+        case RA_SERVER_SOCKET_INIT_SEQ3_FAILED:
+            return "Incoming connection socket initiating sequence 3 Failed";
+        case RA_SERVER_CREATE_OPUS_ENCODER_FAILED:
+            return "Failed to create opus encoder";
+        case RA_SERVER_OPUS_ENCODER_CTL_FAILED:
+            return "Failed to setting opus encode bitrate";
+        case RA_SERVER_OPUS_ENCODE_FAILED:
+            return "Opus encoder failed to operate";
         default:
-            return "Unknown error occurred.";
+            return "Unknown error occurred";
     }
-    return NULL;
 }
 
 uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result) {
