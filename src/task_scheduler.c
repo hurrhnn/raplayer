@@ -63,8 +63,7 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
             pthread_rwlock_wrlock(task_scheduler_args->client_context_rwlock);
             *task_scheduler_args->client_context = realloc(*task_scheduler_args->client_context,
                                                            sizeof(ra_node_t) * (*client_count));
-            memset(*task_scheduler_args->client_context + sizeof(ra_node_t) * ((*client_count) - 1), 0x0,
-                   sizeof(ra_node_t));
+            memset((*task_scheduler_args->client_context) + (*client_count - 1), 0x0, sizeof(ra_node_t));
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 
             pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
@@ -94,6 +93,7 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
                 remove_task(task);
             } else
                 append_task(node->recv_queue, task);
+
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
         }
     }
