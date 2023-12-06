@@ -60,7 +60,7 @@ void print_usage(char **argv) {
     puts("");
 }
 
-void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
+void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
     fread(pPcm->pcmHeader.chunk_id, DWORD, 1, fin);
     fread(&pPcm->pcmHeader.chunk_size, DWORD, 1, fin);
     fread(pPcm->pcmHeader.format, DWORD, 1, fin);
@@ -90,12 +90,6 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm, fpos_t *before_data_pos) {
 
     memcpy(pPcm->pcmDataChunk.chunk_id, "data", DWORD);
     fread(&pPcm->pcmDataChunk.chunk_size, DWORD, 1, fin);
-
-    fgetpos(fin, before_data_pos); // Save begin of pcm data position.
-
-    long pcm_data_size = pPcm->pcmDataChunk.chunk_size;
-    pPcm->pcmDataChunk.data = malloc(pcm_data_size);
-    fread(pPcm->pcmDataChunk.data, pcm_data_size, 1, fin);
 }
 
 struct termios orig_termios;
@@ -141,10 +135,7 @@ void *pthread_receive_signal(void *p_pthread_signal_args) {
     pthread_mutex_t *p_mutex = (pthread_mutex_t *) callback_user_data_args[2];
     int *pthread_status = (int *) callback_user_data_args[3];
 
-    while (true) {
-        int is_client_eos = raplayer_get_client_status(callback_user_data_args[0], 0);
-        if (!(is_client_eos == -1 || !is_client_eos))
-            break;
+    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
         pthread_mutex_lock(p_mutex);
         pthread_cond_wait(p_cond, p_mutex);
         *pthread_status = 1;
@@ -160,10 +151,7 @@ void *change_symbol(void *p_symbol_args) {
 
     int symbol_cnt = 0;
     char symbols[] = {'-', '\\', '|', '/'};
-    while (true) {
-        int is_client_eos = raplayer_get_client_status(callback_user_data_args[0], 0);
-        if (!(is_client_eos == -1 || !is_client_eos))
-            break;
+    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
         *((char *) symbol) = symbols[symbol_cnt++ % DWORD];
 
         struct timespec timespec;
@@ -201,11 +189,11 @@ void *print_info(void *p_callback_user_data_args) {
     pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, p_pthread_signal_args);
     pthread_create(&symbol_changer, NULL, change_symbol, p_symbol_args);
 
-    while (raplayer_get_client_status(callback_user_data_args[0], 0) == -1);
+    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTED));
     printf("Preparing socket sequence has been Successfully Completed.");
     printf("\n\rStarted Playing Opus Packets...\n\n\r");
 
-    while (!(raplayer_get_client_status(callback_user_data_args[0], 0))) {
+    while (!(raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED))) {
         if (volume_status) {
             volume_status = 0;
             print_volume_remain_cnt = 20;
@@ -228,7 +216,7 @@ void *print_info(void *p_callback_user_data_args) {
 
         struct timespec timespec;
         timespec.tv_sec = 0;
-        timespec.tv_nsec = 75000000;
+        timespec.tv_nsec = 50000000;
         nanosleep(&timespec, NULL);
     }
 
@@ -246,10 +234,7 @@ void *control_volume(void *p_callback_user_data_args) {
     double *volume = (double *) callback_user_data_args[1];
     pthread_cond_t *print_volume_cond = (pthread_cond_t *) callback_user_data_args[4];
 
-    while (true) {
-        int is_client_eos = raplayer_get_client_status(callback_user_data_args[0], 0);
-        if (!(is_client_eos == -1 || !is_client_eos))
-            break;
+    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
         if (kbhit()) {
             switch (getch()) {
                 case '\033':
@@ -270,7 +255,7 @@ void *control_volume(void *p_callback_user_data_args) {
 
                 case 0x03:
                 case 0x1A:
-                    raplayer_set_client_status(callback_user_data_args[0], 0, 1);
+                    raplayer_set_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED);
                     break;
 
                 default:
@@ -300,7 +285,7 @@ void client_frame_callback(void *frame, int frame_size, void *user_args) {
 uint8_t *server_frame_callback(void *user_args) {
     void **callback_user_data_args = user_args;
     if(feof((void *) callback_user_data_args[1]))
-        raplayer_set_server_status((void *) callback_user_data_args[0], 0, 1);
+        raplayer_set_server_status((void *) callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED);
 
     fread((void *) callback_user_data_args[2], WORD * OPUS_AUDIO_CH, FRAME_SIZE, (void *) callback_user_data_args[1]);
     return callback_user_data_args[2];
@@ -377,10 +362,10 @@ int main(int argc, char **argv) {
                 NULL);
 
         p_callback_user_data_args[6] = stream;
-
         Pa_StartStream(stream);
-        uint64_t id = raplayer_spawn_client(&raplayer, argv[2], port, client_frame_callback, p_callback_user_data_args);
 
+        uint64_t id = raplayer_spawn_client(&raplayer, argv[2], port,
+                                            client_frame_callback, p_callback_user_data_args);
         pthread_t info_printer;
         pthread_t volume_controller;
 
@@ -388,9 +373,6 @@ int main(int argc, char **argv) {
         pthread_create(&volume_controller, NULL, control_volume,
                        p_callback_user_data_args); // Activate volume controller.
         raplayer_wait_client(&raplayer, id);
-
-        pthread_join(info_printer, NULL);
-        pthread_join(volume_controller, NULL);
 
         Pa_StopStream(stream);
         Pa_CloseStream(stream);
@@ -453,7 +435,7 @@ int main(int argc, char **argv) {
 
         fpos_t before_data_pos;
         if (!pipe_mode)
-            init_pcm_structure(fin, pcm_struct, &before_data_pos);
+            init_pcm_structure(fin, pcm_struct);
 
         if (!pipe_mode && (pcm_struct->pcmFmtChunk.channels != 2 ||
                            pcm_struct->pcmFmtChunk.sample_rate != 48000 ||
@@ -479,9 +461,6 @@ int main(int argc, char **argv) {
         puts("Waiting for Client... ");
         fflush(stdout);
 
-        if (!pipe_mode)
-            fsetpos(fin, &before_data_pos); // Re-read pcm data bytes from stream.
-
         void **p_callback_user_data_args = calloc(sizeof(void *), DWORD);
         p_callback_user_data_args[0] = &raplayer;
         p_callback_user_data_args[1] = fin;
@@ -490,6 +469,8 @@ int main(int argc, char **argv) {
         uint64_t id = raplayer_spawn_server(&raplayer, port, server_frame_callback, p_callback_user_data_args);
         raplayer_wait_server(&raplayer, id);
         raplayer_set_server_status(&raplayer, id, 1);
+
+        free(p_callback_user_data_args[2]);
     }
     return EXIT_SUCCESS;
 }

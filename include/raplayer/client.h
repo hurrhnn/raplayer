@@ -51,22 +51,11 @@ typedef struct {
             int32_t sample_rate;
             uint16_t bit_per_sample;
         };
-        int status;
+        uint8_t status;
         pthread_t thread;
     } *list;
     uint64_t idx;
 } ra_client_t;
-
-#define RA_CLIENT_NOT_CONNECTED 0
-#define RA_CLIENT_INIT_FAILED 1
-#define RA_CLIENT_CONNECTED 2
-#define RA_CLIENT_CONNECTION_EXHAUSTED 3
-
-typedef enum {
-    RAPLAYER_SOCKET_CREATION_FAILED = 1,
-    RA_CLIENT_CONNECTION_RESOLVE_FAILED,
-    RA_CLIENT_ADDRESS_CONVERSION_FAILED,
-} ra_client_errno_t;
 
 void* ra_client(void *p_client);
 

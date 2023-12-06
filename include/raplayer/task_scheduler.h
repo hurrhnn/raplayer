@@ -43,7 +43,7 @@ typedef struct {
 } task_scheduler_info_t;
 
 typedef struct {
-    int *status;
+    uint8_t *status;
     int *client_count;
     ra_node_t **client_context;
 

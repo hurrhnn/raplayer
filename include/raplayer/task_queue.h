@@ -24,6 +24,7 @@
 #include <sys/socket.h>
 #include <raplayer/config.h>
 #include <raplayer/chacha20.h>
+#include <raplayer/utils.h>
 
 #ifndef RAPLAYER_TASK_QUEUE_H
 #define RAPLAYER_TASK_QUEUE_H
@@ -42,12 +43,6 @@ typedef struct {
     pthread_cond_t empty, fill;
 
 } ra_task_queue_t;
-
-typedef enum {
-    RA_NODE_INITIATED = (1 << 0),
-    RA_NODE_HEARTBEAT_RECEIVED = (1 << 1),
-    RA_NODE_CONNECTED = (1 << 2)
-} ra_node_status_t;
 
 typedef struct {
     ra_node_status_t status;

@@ -24,9 +24,8 @@
 #include <raplayer/task_queue.h>
 #include <raplayer/utils.h>
 
-// TODO: make `-1` to error code
 int client_init_socket(ra_client_t *client, uint64_t idx) {
-    // Create socket file descriptor.
+    /* Create socket file descriptor. */
     if ((client->list[idx].sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         return RAPLAYER_SOCKET_CREATION_FAILED;
 
@@ -82,10 +81,11 @@ uint32_t ready_sock_client_seq1(ra_client_t *client, uint64_t idx) {
         memcpy(&orig_pcm_size, buffer, DWORD);
 
         sendto(sock_fd, OK, sizeof(OK), 0, server_addr, server_len);
-        return orig_pcm_size;
+        free(buffer);
+        return 0;
     }
     free(buffer);
-    return 0;
+    return RA_CLIENT_SOCKET_INIT_SEQ1_FAILED;
 }
 
 unsigned char *ready_sock_client_seq2(ra_client_t *client, uint64_t idx) {
@@ -99,7 +99,7 @@ unsigned char *ready_sock_client_seq2(ra_client_t *client, uint64_t idx) {
         sendto(sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &client->list[idx].server_addr, sizeof(struct sockaddr));
         return crypto_payload;
     }
-    return NULL;
+    return (unsigned char *) RA_CLIENT_SOCKET_INIT_SEQ2_FAILED;
 }
 
 void *send_heartbeat(void *p_client) {
@@ -108,7 +108,7 @@ void *send_heartbeat(void *p_client) {
     timespec.tv_sec = 0;
     timespec.tv_nsec = 250000000;
 
-    while (client->list[0].status == RA_CLIENT_CONNECTED) {
+    while (!(client->list[0].status & RA_NODE_CONNECTION_EXHAUSTED)) {
         sendto(client->list[0].sock_fd, HEARTBEAT, sizeof(HEARTBEAT), 0,
                (struct sockaddr *) &client->list[0].server_addr,
                sizeof(struct sockaddr));
@@ -120,36 +120,40 @@ void *send_heartbeat(void *p_client) {
 void* ra_client(void *p_client) {
     ra_client_t *client = p_client;
     uint64_t idx = client->idx;
+    client->list[idx].status |= RA_NODE_INITIATED;
 
     int err;
+    err = client_init_socket(client, idx);
+    if(err != 0)
+        return (void *) (uintptr_t) err;
 
-    client_init_socket(client, idx);
-    ready_sock_client_seq1(client, idx);
+    err = (int) ready_sock_client_seq1(client, idx);
+    if(err == RA_CLIENT_SOCKET_INIT_SEQ1_FAILED)
+        return (void *) (uintptr_t) err;
 
     struct chacha20_context ctx;
     unsigned char *crypto_payload = ready_sock_client_seq2(client, idx);
+    if((int)(uintptr_t) crypto_payload == RA_CLIENT_SOCKET_INIT_SEQ2_FAILED)
+        return (void *) (uintptr_t) crypto_payload;
 
     OpusDecoder *decoder; /* Create a new decoder state */
     decoder = opus_decoder_create(client->list[idx].sample_rate, client->list[idx].channels, &err);
-    if (err < 0) {
-        printf("Error: failed to create an decoder - %s\n", opus_strerror(err));
-        client->list[idx].status = RA_CLIENT_INIT_FAILED;
-        return (void *) EXIT_FAILURE;
-    }
+    if (err < 0)
+        return (void *) RA_CLIENT_CREATE_OPUS_DECODER_FAILED;
 
-    client->list[idx].status = RA_CLIENT_CONNECTED;
+    client->list[idx].status |= RA_NODE_CONNECTED;
     pthread_t heartbeat_sender;
     pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) client); // Activate heartbeat sender. //TODO: MEMFIX
     chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
+
     unsigned char c_bits[MAX_DATA_SIZE];
     unsigned char **calculated_c_bits = malloc(sizeof(void *));
-
     opus_int16 *out = malloc(FRAME_SIZE * client->list[idx].channels);
     unsigned char *pcm_bytes = malloc(FRAME_SIZE * BYTE * client->list[idx].channels);
     while (true) {
         recvfrom(client->list[idx].sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
-        if (client->list[idx].status || (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S')) { // Detect End of Stream.
-            client->list[idx].status = 1;
+        if (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') { // Detect End of Stream.
+            client->list[idx].status = RA_NODE_CONNECTION_EXHAUSTED;
             break;
         }
 
@@ -163,8 +167,9 @@ void* ra_client(void *p_client) {
         int frame_size = opus_decode(decoder, (unsigned char *) *calculated_c_bits, (opus_int32) nbBytes, out,
                                      FRAME_SIZE, 0);
         if (frame_size < 0) {
-            printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
-            return (void *) EXIT_FAILURE;
+//            printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
+            client->list[idx].status = RA_NODE_CONNECTION_EXHAUSTED;
+            return (void *) RA_CLIENT_OPUS_DECODE_FAILED;
         }
 
         /* Convert to little-endian ordering. */
@@ -175,6 +180,8 @@ void* ra_client(void *p_client) {
         // TODO: implement the client-side time synchronized callback
         client->list[idx].frame_callback(pcm_bytes, frame_size, client->list[idx].callback_user_data);
     }
+    client->list[idx].status = RA_NODE_CONNECTION_EXHAUSTED;
+
     /* Cleaning up. */
     free(calculated_c_bits);
 

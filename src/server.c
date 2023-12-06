@@ -24,39 +24,34 @@
 #include <raplayer/chacha20.h>
 #include <raplayer/task_scheduler.h>
 #include <raplayer/task_queue.h>
+#include <raplayer/utils.h>
 
 int server_init_socket(ra_server_t *server, uint64_t idx) {
-    // Creating socket file descriptor.
-    if ((server->list[idx].sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        fprintf(stdout, "Error: Socket Creation Failed.\n");
-        return -1;
-    }
+    /* Create socket file descriptor */
+    if ((server->list[idx].sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+        return RAPLAYER_SOCKET_CREATION_FAILED;
 
     server->list[idx].server_addr.sin_family = AF_INET; // IPv4
     server->list[idx].server_addr.sin_port = htons((uint16_t) server->list[idx].port);
     server->list[idx].server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     /* Bind the socket with the server address. */
-    int status = (bind(server->list[idx].sock_fd, (struct sockaddr *) &server->list[idx].server_addr,
-                   sizeof(struct sockaddr)));
-    if (status < 0) {
-        printf("Error: Socket Bind Failed.\n");
-        printf("%d", errno);
-        return status;
-    }
+    if((bind(server->list[idx].sock_fd, (struct sockaddr *) &server->list[idx].server_addr,
+             sizeof(struct sockaddr))) < 0)
+        return RA_SERVER_SOCKET_BIND_FAILED;
 
     return 0;
 }
 
-bool ready_sock_server_seq1(ra_task_queue_t *recv_queue) {
+int ready_sock_server_seq1(ra_task_queue_t *recv_queue) {
     ra_task_t *task = retrieve_task(recv_queue);
     bool is_verified = (strncmp((char *) task->data, "HELLO", task->data_len) == 0);
     remove_task(task);
 
-    return is_verified;
+    return (is_verified ? 0 : RA_SERVER_SOCKET_INIT_SEQ1_FAILED);
 }
 
-bool ready_sock_server_seq2(ra_node_t *client, uint32_t len) {
+int ready_sock_server_seq2(ra_node_t *client, uint32_t len) {
     bool is_verified = false;
     int stream_info_size = WORD + DWORD + WORD;
     int buffer_size = 5;
@@ -81,7 +76,7 @@ bool ready_sock_server_seq2(ra_node_t *client, uint32_t len) {
     ra_task_t *task = retrieve_task(client->recv_queue);
     if (strncmp((char *) task->data, "OK", task->data_len) != 0) {
         remove_task(task);
-        return is_verified;
+        return RA_SERVER_SOCKET_INIT_SEQ2_FAILED;
     }
 
     if (stream_info_size ==
@@ -100,11 +95,10 @@ bool ready_sock_server_seq2(ra_node_t *client, uint32_t len) {
             }
         }
     }
-    return is_verified;
+    return (is_verified ? 0 : RA_SERVER_SOCKET_INIT_SEQ2_FAILED);
 }
 
-bool
-ready_sock_server_seq3(ra_node_t *client) {
+int ready_sock_server_seq3(ra_node_t *client) {
     bool is_verified = false;
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
     unsigned char *crypto_payload = generate_random_bytestream(crypto_payload_size);
@@ -122,7 +116,7 @@ ready_sock_server_seq3(ra_node_t *client) {
         }
     }
     free(crypto_payload);
-    return is_verified;
+    return is_verified ? 0 : RA_SERVER_SOCKET_INIT_SEQ3_FAILED;
 }
 
 void *provide_20ms_opus_builder(void *p_opus_builder_args) {
@@ -155,7 +149,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         int nbBytes = opus_encode(opus_builder_args->encoder, in, FRAME_SIZE, c_bits, FRAME_SIZE);
         if (nbBytes < 0) {
             printf("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
-            *opus_builder_args->status = true;
+            *opus_builder_args->status = RA_NODE_CONNECTION_EXHAUSTED;
             break;
         }
 
@@ -187,7 +181,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         pthread_cond_signal(opus_builder_args->opus_builder_cond);
         pthread_mutex_unlock(opus_builder_args->opus_builder_mutex);
     }
-    *opus_builder_args->status = true;
+    *opus_builder_args->status = RA_NODE_CONNECTION_EXHAUSTED;
     free(buffer);
     return NULL;
 }
@@ -282,7 +276,7 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
                        ntohs(client->node_addr.sin_port));
                 printf("\nReceiving client heartbeat timed out.\nStopped Sending Opus Packets and cleaned up.\n");
                 fflush(stdout);
-                client->status &= ~RA_NODE_CONNECTED;
+                client->status = RA_NODE_CONNECTION_EXHAUSTED;
                 pthread_rwlock_unlock(((void **) p_heartbeat_receiver_args)[2]);
                 break;
             }
@@ -294,7 +288,6 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
 
 _Noreturn void *handle_client(void *p_client_handler_args) {
     client_handler_args_t *client_handler_args = p_client_handler_args;
-    int *server_status = client_handler_args->status;
     const int *client_count = client_handler_args->client_count;
 
     pthread_mutex_t *complete_init_queue_mutex = client_handler_args->complete_init_mutex[0];
@@ -308,10 +301,12 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         pthread_mutex_unlock(complete_init_queue_mutex);
 
         ra_node_t *client = &(*client_handler_args->client_context)[(*client_count) - 1];
-        if (ready_sock_server_seq1(client->recv_queue)) {
-            if (ready_sock_server_seq2(client, client_handler_args->data_len)) {
-                if (ready_sock_server_seq3(client))
+        if (!ready_sock_server_seq1(client->recv_queue)) {
+            if (!ready_sock_server_seq2(client, client_handler_args->data_len)) {
+                if (!ready_sock_server_seq3(client)) {
+                    client->status |= RA_NODE_CONNECTED;
                     printf("Preparing socket sequence has been Successfully Completed.");
+                }
                 else {
                     printf("Error: A crypto preparation sequence Failed.\n");
                     continue;
@@ -325,7 +320,6 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
             continue;
         }
 
-        client->status |= RA_NODE_CONNECTED;
         printf("\nStarted Sending Opus Packets...\n");
         fflush(stdout);
 
@@ -337,7 +331,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         pthread_t heartbeat_checker;
 
         opus_sender_args_t *p_opus_sender_args = malloc(sizeof(opus_sender_args_t));
-        p_opus_sender_args->status = server_status;
+        p_opus_sender_args->status = client_handler_args->status;
         p_opus_sender_args->client_id = (*client_count) - 1;
         p_opus_sender_args->client_context = client_handler_args->client_context;
         p_opus_sender_args->opus_sender_mutex = client_handler_args->opus_sender_mutex;
@@ -370,19 +364,19 @@ void *ra_server(void *p_server) {
                                   &err);
     if (err < 0) {
         printf("Error: failed to create an encoder - %s\n", opus_strerror(err));
-        return (void *) EXIT_FAILURE;
+        return (void *) RA_SERVER_CREATE_OPUS_ENCODER_FAILED;
     }
 
     if (opus_encoder_ctl(encoder,
                          OPUS_SET_BITRATE(OPUS_AUDIO_SR * OPUS_AUDIO_CH)) <
         0) {
         printf("Error: failed to set bitrate - %s\n", opus_strerror(err));
-        return (void *) EXIT_FAILURE;
+        return (void *) RA_SERVER_OPUS_ENCODER_CTL_FAILED;
     }
 
     err = server_init_socket(server, idx);
     if(err == -1)
-        return (void *) (uint64_t) err;
+        return (void *) (uintptr_t) err;
 
     int client_count = 0;
     pthread_t opus_timer;

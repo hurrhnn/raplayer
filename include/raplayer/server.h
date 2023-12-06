@@ -42,7 +42,8 @@
 #include <raplayer/chacha20.h>
 
 typedef struct {
-    int *status, *is_sender_ready, *client_count, *turn, is_stream_mode;
+    uint8_t *status;
+    int *is_sender_ready, *client_count, *turn, is_stream_mode;
     uint8_t *(*frame_callback) (void* user_data);
     void* callback_user_data;
     OpusEncoder *encoder;
@@ -58,7 +59,8 @@ typedef struct {
 } opus_builder_args_t;
 
 typedef struct {
-    int *status, client_id;
+    uint8_t *status;
+    int client_id;
     ra_node_t **client_context;
 
     pthread_mutex_t *opus_sender_mutex;
@@ -68,7 +70,8 @@ typedef struct {
 } opus_sender_args_t;
 
 typedef struct {
-    int *status, *turn, is_stream_mode;
+    uint8_t *status;
+    int *turn, is_stream_mode;
 
     pthread_mutex_t *opus_builder_mutex;
     pthread_cond_t *opus_builder_cond;
@@ -87,7 +90,7 @@ typedef struct {
         void* callback_user_data;
         int sock_fd;
         struct sockaddr_in server_addr;
-        int status;
+        uint8_t status;
         pthread_t thread;
     } *list;
     uint64_t idx;
