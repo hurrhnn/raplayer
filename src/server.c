@@ -24,41 +24,39 @@
 #include <raplayer/chacha20.h>
 #include <raplayer/task_scheduler.h>
 #include <raplayer/task_queue.h>
-#include <raplayer/utils.h>
 
-int server_init_socket(const struct sockaddr_in *p_server_addr, int port) {
-    struct sockaddr_in server_addr = *p_server_addr;
-    int sock_fd;
-
+int server_init_socket(ra_server_t *server, uint64_t idx) {
     // Creating socket file descriptor.
-    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        printf("Error: Socket Creation Failed.\n");
+    if ((server->list[idx].sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+        fprintf(stdout, "Error: Socket Creation Failed.\n");
         return -1;
     }
-    memset((char *) &server_addr, 0, sizeof(server_addr));
 
-    server_addr.sin_family = AF_INET; // IPv4
-    server_addr.sin_port = htons((uint16_t) port);
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server->list[idx].server_addr.sin_family = AF_INET; // IPv4
+    server->list[idx].server_addr.sin_port = htons((uint16_t) server->list[idx].port);
+    server->list[idx].server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     /* Bind the socket with the server address. */
-    if (bind(sock_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+    int status = (bind(server->list[idx].sock_fd, (struct sockaddr *) &server->list[idx].server_addr,
+                   sizeof(struct sockaddr)));
+    if (status < 0) {
         printf("Error: Socket Bind Failed.\n");
-        return -1;
+        printf("%d", errno);
+        return status;
     }
 
-    return sock_fd;
+    return 0;
 }
 
 bool ready_sock_server_seq1(ra_task_queue_t *recv_queue) {
     ra_task_t *task = retrieve_task(recv_queue);
-    bool is_verified = (strncmp((char *) task->buffer, "HELLO", task->buffer_len) == 0);
-    free(task);
+    bool is_verified = (strncmp((char *) task->data, "HELLO", task->data_len) == 0);
+    remove_task(task);
 
     return is_verified;
 }
 
-bool ready_sock_server_seq2(ra_client_t *client, uint32_t len) {
+bool ready_sock_server_seq2(ra_node_t *client, uint32_t len) {
     bool is_verified = false;
     int stream_info_size = WORD + DWORD + WORD;
     int buffer_size = 5;
@@ -76,29 +74,29 @@ bool ready_sock_server_seq2(ra_client_t *client, uint32_t len) {
     sprintf(buffer, "%d", stream_info_size);
 
     sendto(client->sock_fd, buffer, buffer_size, 0,
-           (struct sockaddr *) &client->client_addr,
+           (struct sockaddr *) &client->node_addr,
            client->socket_len);
     free(buffer);
 
     ra_task_t *task = retrieve_task(client->recv_queue);
-    if (strncmp((char *) task->buffer, "OK", task->buffer_len) != 0) {
-        free(task);
+    if (strncmp((char *) task->data, "OK", task->data_len) != 0) {
+        remove_task(task);
         return is_verified;
     }
 
     if (stream_info_size ==
         sendto(client->sock_fd, stream_info, stream_info_size, 0,
-               (struct sockaddr *) &client->client_addr, client->socket_len)) {
+               (struct sockaddr *) &client->node_addr, client->socket_len)) {
 
         task = retrieve_task(client->recv_queue);
-        if (stream_info_size == strtol((char *) task->buffer, NULL, 10)) {
-            sendto(client->sock_fd, &len, DWORD, 0, (struct sockaddr *) &client->client_addr, client->socket_len);
+        if (stream_info_size == strtol((char *) task->data, NULL, 10)) {
+            sendto(client->sock_fd, &len, DWORD, 0, (struct sockaddr *) &client->node_addr, client->socket_len);
 
-            free(task);
+            remove_task(task);
             task = retrieve_task(client->recv_queue);
-            if (strncmp((char *) task->buffer, "OK", task->buffer_len) == 0) {
+            if (strncmp((char *) task->data, "OK", task->data_len) == 0) {
                 is_verified = true;
-                free(task);
+                remove_task(task);
             }
         }
     }
@@ -106,20 +104,20 @@ bool ready_sock_server_seq2(ra_client_t *client, uint32_t len) {
 }
 
 bool
-ready_sock_server_seq3(ra_client_t *client) {
+ready_sock_server_seq3(ra_node_t *client) {
     bool is_verified = false;
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
     unsigned char *crypto_payload = generate_random_bytestream(crypto_payload_size);
 
     if (crypto_payload_size ==
         sendto(client->sock_fd, crypto_payload, crypto_payload_size, 0,
-               (struct sockaddr *) &client->client_addr, client->socket_len)) {
+               (struct sockaddr *) &client->node_addr, client->socket_len)) {
 
         ra_task_t *task = retrieve_task(client->recv_queue);
-        if (!strncmp((char *) task->buffer, OK, task->buffer_len)) {
+        if (!strncmp((char *) task->data, OK, task->data_len)) {
             memset(&(*client).crypto_context, 0x0, sizeof(struct chacha20_context));
             chacha20_init_context(&(*client).crypto_context, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
-            free(task);
+            remove_task(task);
             is_verified = true;
         }
     }
@@ -130,32 +128,17 @@ ready_sock_server_seq3(ra_client_t *client) {
 void *provide_20ms_opus_builder(void *p_opus_builder_args) {
     opus_builder_args_t *opus_builder_args = (opus_builder_args_t *) p_opus_builder_args;
 
-    unsigned char pcm_bytes[FRAME_SIZE * OPUS_AUDIO_CH * WORD];
     unsigned char *buffer = calloc(MAX_DATA_SIZE, BYTE);
     opus_int16 in[FRAME_SIZE * OPUS_AUDIO_CH];
     unsigned char c_bits[FRAME_SIZE]; // TODO: need to change for correspond adaptive latency
-
-    /* wait consume for client connection if we are not stream mode. */
-    if (!opus_builder_args->is_stream_mode) {
-        pthread_mutex_lock(opus_builder_args->complete_init_client_mutex);
-        pthread_cond_wait(opus_builder_args->complete_init_client_cond, opus_builder_args->complete_init_client_mutex);
-        pthread_mutex_unlock(opus_builder_args->complete_init_client_mutex);
-    }
 
     while (true) {
         pthread_mutex_lock(opus_builder_args->opus_builder_mutex);
         while (*opus_builder_args->turn != 0) {
             pthread_cond_wait(opus_builder_args->opus_builder_cond, opus_builder_args->opus_builder_mutex);
         }
-
         /* Read 16bit/sample audio frame. */
-        fread(pcm_bytes, WORD * OPUS_AUDIO_CH, FRAME_SIZE, opus_builder_args->fin);
-        if (feof(opus_builder_args->fin)) {
-            *opus_builder_args->turn = 1;
-            pthread_cond_signal(opus_builder_args->opus_builder_cond);
-            pthread_mutex_unlock(opus_builder_args->opus_builder_mutex);
-            break; // End Of Stream.
-        }
+        unsigned char *pcm_bytes = opus_builder_args->frame_callback(opus_builder_args->callback_user_data);
 
         if (!*opus_builder_args->is_sender_ready) {
             *opus_builder_args->turn = 1;
@@ -186,13 +169,13 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         // chacha20_xor(&crypto_context, c_bits, nbBytes); /* use client's crypto context instead of shared context */
         for (int i = 0; i < *opus_builder_args->client_count; i++) {
             pthread_rwlock_rdlock(opus_builder_args->client_context_rwlock);
-            ra_client_t *client = &(*opus_builder_args->client_context)[i];
-            if ((client->status & RA_CLIENT_INITIATED) && (client->status & RA_CLIENT_CONNECTED)) {
-                ra_task_t *opus_frame = malloc(sizeof(ra_task_t));
-                memset(opus_frame, 0x0, sizeof(ra_task_t));
-                opus_frame->buffer_len = (ssize_t) (nbBytes_len + sizeof(OPUS_FLAG) - 1 + nbBytes);
-                memcpy(opus_frame->buffer, buffer, opus_frame->buffer_len);
-                chacha20_xor(&client->crypto_context, opus_frame->buffer + nbBytes_len + sizeof(OPUS_FLAG) - 1,
+            ra_node_t *client = &(*opus_builder_args->client_context)[i];
+            if ((client->status & RA_NODE_INITIATED) && (client->status & RA_NODE_CONNECTED)) {
+                ra_task_t *opus_frame = create_task(MAX_DATA_SIZE);
+                memset(opus_frame->data, 0x0, opus_frame->data_len);
+                opus_frame->data_len = (ssize_t) (nbBytes_len + sizeof(OPUS_FLAG) - 1 + nbBytes);
+                memcpy(opus_frame->data, buffer, opus_frame->data_len);
+                chacha20_xor(&client->crypto_context, opus_frame->data + nbBytes_len + sizeof(OPUS_FLAG) - 1,
                              nbBytes);
 
                 /* Enqueue the payload. */
@@ -213,13 +196,13 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
     opus_sender_args_t *opus_sender_args = (opus_sender_args_t *) p_opus_sender_args;
     while ((!*opus_sender_args->status)) {
         pthread_rwlock_rdlock(opus_sender_args->client_context_rwlock);
-        ra_client_t *client = &(*opus_sender_args->client_context)[opus_sender_args->client_id];
-        if ((client->status & RA_CLIENT_INITIATED) && (client->status & RA_CLIENT_CONNECTED)) {
+        ra_node_t *client = &(*opus_sender_args->client_context)[opus_sender_args->client_id];
+        if ((client->status & RA_NODE_INITIATED) && (client->status & RA_NODE_CONNECTED)) {
             ra_task_t *opus_frame = retrieve_task(client->send_queue);
             pthread_mutex_lock(opus_sender_args->opus_sender_mutex);
             pthread_cond_wait(opus_sender_args->opus_sender_cond, opus_sender_args->opus_sender_mutex);
-            sendto(client->sock_fd, opus_frame->buffer,
-                   opus_frame->buffer_len, 0, (struct sockaddr *) &client->client_addr, client->socket_len);
+            sendto(client->sock_fd, opus_frame->data,
+                   opus_frame->data_len, 0, (struct sockaddr *) &client->node_addr, client->socket_len);
             pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
             pthread_rwlock_unlock(opus_sender_args->client_context_rwlock);
             free(opus_frame);
@@ -233,13 +216,6 @@ void *provide_20ms_opus_sender(void *p_opus_sender_args) {
 
 void *provide_20ms_opus_timer(void *p_opus_timer_args) {
     opus_timer_args_t *opus_timer_args = (opus_timer_args_t *) p_opus_timer_args;
-
-    /* wait consume for client connection if we are not stream mode. */
-    if (!opus_timer_args->is_stream_mode) {
-        pthread_mutex_lock(opus_timer_args->complete_init_client_mutex);
-        pthread_cond_wait(opus_timer_args->complete_init_client_cond, opus_timer_args->complete_init_client_mutex);
-        pthread_mutex_unlock(opus_timer_args->complete_init_client_mutex);
-    }
 
     struct timespec start_timespec;
     clock_gettime(CLOCK_MONOTONIC, &start_timespec);
@@ -288,25 +264,25 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
 
     while (true) {
         pthread_rwlock_rdlock(((void **) p_heartbeat_receiver_args)[2]);
-        ra_client_t *client = &(*((ra_client_t **) ((void **) p_heartbeat_receiver_args)[0]))
+        ra_node_t *client = &(*((ra_node_t **) ((void **) p_heartbeat_receiver_args)[0]))
         [((opus_sender_args_t *) ((void **) p_heartbeat_receiver_args)[1])->client_id];
 
-        if ((client->status & RA_CLIENT_INITIATED) && (client->status & RA_CLIENT_CONNECTED)) {
-            client->status &= ~RA_CLIENT_HEARTBEAT_RECEIVED;
+        if ((client->status & RA_NODE_INITIATED) && (client->status & RA_NODE_CONNECTED)) {
+            client->status &= ~RA_NODE_HEARTBEAT_RECEIVED;
             pthread_rwlock_unlock(((void **) p_heartbeat_receiver_args)[2]);
             nanosleep(&timespec, NULL);
 
             pthread_rwlock_rdlock(((void **) p_heartbeat_receiver_args)[2]);
-            client = &(*((ra_client_t **) ((void **) p_heartbeat_receiver_args)[0]))
+            client = &(*((ra_node_t **) ((void **) p_heartbeat_receiver_args)[0]))
             [((opus_sender_args_t *) ((void **) p_heartbeat_receiver_args)[1])->client_id];
 
-            if (!(client->status & RA_CLIENT_HEARTBEAT_RECEIVED)) {
-                printf("\n%02d: Connection closed by %s:%d",
-                       client->client_id + 1, inet_ntoa(client->client_addr.sin_addr),
-                       ntohs(client->client_addr.sin_port));
+            if (!(client->status & RA_NODE_HEARTBEAT_RECEIVED)) {
+                printf("\n%02llu: Connection closed by %s:%d",
+                       client->node_id + 1, inet_ntoa(client->node_addr.sin_addr),
+                       ntohs(client->node_addr.sin_port));
                 printf("\nReceiving client heartbeat timed out.\nStopped Sending Opus Packets and cleaned up.\n");
                 fflush(stdout);
-                client->status &= ~RA_CLIENT_CONNECTED;
+                client->status &= ~RA_NODE_CONNECTED;
                 pthread_rwlock_unlock(((void **) p_heartbeat_receiver_args)[2]);
                 break;
             }
@@ -331,7 +307,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
         pthread_cond_wait(complete_init_queue_cond, complete_init_queue_mutex);
         pthread_mutex_unlock(complete_init_queue_mutex);
 
-        ra_client_t *client = &(*client_handler_args->client_context)[(*client_count) - 1];
+        ra_node_t *client = &(*client_handler_args->client_context)[(*client_count) - 1];
         if (ready_sock_server_seq1(client->recv_queue)) {
             if (ready_sock_server_seq2(client, client_handler_args->data_len)) {
                 if (ready_sock_server_seq3(client))
@@ -349,7 +325,7 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
             continue;
         }
 
-        client->status |= RA_CLIENT_CONNECTED;
+        client->status |= RA_NODE_CONNECTED;
         printf("\nStarted Sending Opus Packets...\n");
         fflush(stdout);
 
@@ -381,8 +357,10 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
     }
 }
 
-int ra_server(int port, int fd, uint32_t data_len, int *status) {
-    FILE *fin = fdopen(fd, "rb");
+void *ra_server(void *p_server) {
+    /* Store ra_server idx. */
+    ra_server_t *server = p_server;
+    uint64_t idx = server->idx;
 
     /* Create a new encoder state. */
     int err;
@@ -392,24 +370,19 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
                                   &err);
     if (err < 0) {
         printf("Error: failed to create an encoder - %s\n", opus_strerror(err));
-        return EXIT_FAILURE;
+        return (void *) EXIT_FAILURE;
     }
 
     if (opus_encoder_ctl(encoder,
                          OPUS_SET_BITRATE(OPUS_AUDIO_SR * OPUS_AUDIO_CH)) <
         0) {
         printf("Error: failed to set bitrate - %s\n", opus_strerror(err));
-        return EXIT_FAILURE;
+        return (void *) EXIT_FAILURE;
     }
 
-    struct sockaddr_in server_addr;
-    int sock_fd = server_init_socket(&server_addr, port);
-    if (sock_fd == -1)
-        return -1;
-
-    /* Set fd to non-blocking mode. */
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    err = server_init_socket(server, idx);
+    if(err == -1)
+        return (void *) (uint64_t) err;
 
     int client_count = 0;
     pthread_t opus_timer;
@@ -427,21 +400,21 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
 
     pthread_rwlock_t client_context_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-    ra_client_t **client_context = malloc(sizeof(ra_client_t *));
+    ra_node_t **client_context = malloc(sizeof(ra_node_t *));
     *client_context = NULL;
 
     task_scheduler_info_t task_scheduler_args;
     client_handler_args_t client_handler_args;
 
-    task_scheduler_args.sock_fd = sock_fd;
+    task_scheduler_args.sock_fd = server->list[idx].sock_fd;
     task_scheduler_args.client_count = &client_count;
     task_scheduler_args.client_context = client_context;
     task_scheduler_args.complete_init_queue_mutex = &complete_init_queue_mutex;
     task_scheduler_args.complete_init_queue_cond = &complete_init_queue_cond;
     task_scheduler_args.client_context_rwlock = &client_context_rwlock;
 
-    client_handler_args.status = status;
-    client_handler_args.data_len = data_len;
+    client_handler_args.status = &server->list[idx].status;
+    client_handler_args.data_len = 0;
     client_handler_args.is_sender_ready = 0;
     client_handler_args.client_context = client_context;
     client_handler_args.client_count = &client_count;
@@ -469,12 +442,13 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
     /* Construct opus builder, sender context. */
     opus_builder_args_t *p_opus_builder_args = malloc(sizeof(opus_builder_args_t));
 
-    p_opus_builder_args->status = status;
+    p_opus_builder_args->status = &server->list[idx].status;
     p_opus_builder_args->is_sender_ready = &client_handler_args.is_sender_ready;
-    p_opus_builder_args->is_stream_mode = (fd == 0);
+    p_opus_builder_args->is_stream_mode = true;
+    p_opus_builder_args->frame_callback = server->list[idx].frame_callback;
+    p_opus_builder_args->callback_user_data = server->list[idx].callback_user_data;
     p_opus_builder_args->turn = malloc(sizeof(int));
     *p_opus_builder_args->turn = 0;
-    p_opus_builder_args->fin = fin;
     p_opus_builder_args->encoder = encoder;
     p_opus_builder_args->client_context = client_context;
     p_opus_builder_args->client_count = &client_count;
@@ -485,7 +459,7 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
     p_opus_builder_args->client_context_rwlock = &client_context_rwlock;
 
     opus_timer_args_t *p_opus_timer_args = malloc(sizeof(opus_timer_args_t));
-    p_opus_timer_args->status = status;
+    p_opus_timer_args->status = &server->list[idx].status;
     p_opus_timer_args->turn = p_opus_builder_args->turn;
     p_opus_timer_args->is_stream_mode = p_opus_builder_args->is_stream_mode;
     p_opus_timer_args->opus_builder_mutex = &opus_builder_mutex;
@@ -508,8 +482,8 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
 
     /* Send EOS to clients && clean up. */
     for (int i = 0; i < client_count; i++) {
-        ra_client_t *client = &(*client_context)[i];
-        sendto(task_scheduler_args.sock_fd, EOS, strlen(EOS), 0, (const struct sockaddr *) &client->client_addr,
+        ra_node_t *client = &(*client_context)[i];
+        sendto(task_scheduler_args.sock_fd, EOS, strlen(EOS), 0, (const struct sockaddr *) &client->node_addr,
                client->socket_len);
     }
     free(*client_context);
@@ -517,9 +491,6 @@ int ra_server(int port, int fd, uint32_t data_len, int *status) {
 
     /* Destroy the encoder state. */
     opus_encoder_destroy(encoder);
-
-    /* Close audio stream. */
-    fclose(fin);
 
     return EXIT_SUCCESS;
 }

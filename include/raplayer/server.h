@@ -43,10 +43,11 @@
 
 typedef struct {
     int *status, *is_sender_ready, *client_count, *turn, is_stream_mode;
-    FILE *fin;
+    uint8_t *(*frame_callback) (void* user_data);
+    void* callback_user_data;
     OpusEncoder *encoder;
 
-    ra_client_t **client_context;
+    ra_node_t **client_context;
 
     pthread_mutex_t *opus_builder_mutex;
     pthread_cond_t *opus_builder_cond;
@@ -58,7 +59,7 @@ typedef struct {
 
 typedef struct {
     int *status, client_id;
-    ra_client_t **client_context;
+    ra_node_t **client_context;
 
     pthread_mutex_t *opus_sender_mutex;
     pthread_cond_t *opus_sender_cond;
@@ -79,6 +80,19 @@ typedef struct {
     pthread_rwlock_t *client_context_rwlock;
 } opus_timer_args_t;
 
-int ra_server(int port, int fd, uint32_t len, int *server_status);
+typedef struct {
+    struct {
+        int port;
+        uint8_t *(*frame_callback) (void* user_data);
+        void* callback_user_data;
+        int sock_fd;
+        struct sockaddr_in server_addr;
+        int status;
+        pthread_t thread;
+    } *list;
+    uint64_t idx;
+} ra_server_t;
+
+void *ra_server(void *p_server);
 
 #endif
