@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 project(raplayer VERSION 2.2.0 LANGUAGES C)
 
 include(GNUInstallDirs)
@@ -35,9 +35,9 @@ if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
     find_library(AudioUnit.framework AudioUnit)
     find_library(AudioToolbox.framework AudioToolbox)
     find_library(CoreAudio.framework CoreAudio)
-endif()
-
-if (CMAKE_SYSTEM_NAME MATCHES "Android")
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    find_package(ALSA REQUIRED)
+elseif (CMAKE_SYSTEM_NAME MATCHES "Android")
     file(TO_CMAKE_PATH "${CMAKE_MAKE_PROGRAM}" CMAKE_MAKE_PROGRAM)
     set(CMAKE_C_LIBRARY_ARCHITECTURE ${ANDROID_TOOLCHAIN_NAME})
     set(RAPLAYER_CMAKE_ARGS
