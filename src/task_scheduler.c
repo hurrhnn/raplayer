@@ -56,15 +56,22 @@ _Noreturn void *schedule_task(void *p_task_scheduler_args) {
 
         if (client_id == -1) {
             (*client_count) += 1;
-            printf("\n%02d: Connection from %s:%d\n", *client_count, inet_ntoa(client_addr.sin_addr),
+            RA_INFO("%02d: Connection from %s:%d\n", *client_count, inet_ntoa(client_addr.sin_addr),
                    ntohs(client_addr.sin_port));
             fflush(stdout);
 
+
+            RA_DEBUG_MORE(GRN, "Node context write lock initiated.\n");
             pthread_rwlock_wrlock(task_scheduler_args->client_context_rwlock);
+
+            void *before_address = *task_scheduler_args->client_context;
             *task_scheduler_args->client_context = realloc(*task_scheduler_args->client_context,
                                                            sizeof(ra_node_t) * (*client_count));
             memset((*task_scheduler_args->client_context) + (*client_count - 1), 0x0, sizeof(ra_node_t));
+            RA_DEBUG_MORE(GRN, "Reallocated node context %p to %p, size: 0x%lX\n", before_address,
+                          *task_scheduler_args->client_context, sizeof(ra_node_t) * (*client_count));
             pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
+            RA_DEBUG_MORE(GRN, "Node context write lock released.\n");
 
             pthread_rwlock_rdlock(task_scheduler_args->client_context_rwlock);
             ra_node_t *node = &(*task_scheduler_args->client_context)[(*client_count) - 1];

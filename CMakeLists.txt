@@ -20,6 +20,7 @@ set(RAPLAYER_LIBRARIES "")
 set(RAPLAYER_INCLUDES "")
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
+    set(RAPLAYER_ENABLE_DEBUG ON)
     if (CMAKE_C_COMPILER_ID MATCHES "(GNU|Clang)" OR
             CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
         include(CodeCoverage)

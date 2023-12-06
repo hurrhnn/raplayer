@@ -148,7 +148,7 @@ void *provide_20ms_opus_builder(void *p_opus_builder_args) {
         /* Encode the frame. */
         int nbBytes = opus_encode(opus_builder_args->encoder, in, FRAME_SIZE, c_bits, FRAME_SIZE);
         if (nbBytes < 0) {
-            printf("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
+            RA_ERROR("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
             *opus_builder_args->status = RA_NODE_CONNECTION_EXHAUSTED;
             break;
         }
@@ -271,10 +271,11 @@ void *check_heartbeat(void *p_heartbeat_receiver_args) {
             [((opus_sender_args_t *) ((void **) p_heartbeat_receiver_args)[1])->client_id];
 
             if (!(client->status & RA_NODE_HEARTBEAT_RECEIVED)) {
-                printf("\n%02llu: Connection closed by %s:%d",
+                RA_WARN("%02llu: Connection closed from %s:%d\n",
                        client->node_id + 1, inet_ntoa(client->node_addr.sin_addr),
                        ntohs(client->node_addr.sin_port));
-                printf("\nReceiving client heartbeat timed out.\nStopped Sending Opus Packets and cleaned up.\n");
+                RA_WARN("Receiving client heartbeat timed out.\n");
+                RA_WARN("Stopped Sending Opus Packets and cleaned up.\n");
                 fflush(stdout);
                 client->status = RA_NODE_CONNECTION_EXHAUSTED;
                 pthread_rwlock_unlock(((void **) p_heartbeat_receiver_args)[2]);
@@ -305,22 +306,22 @@ _Noreturn void *handle_client(void *p_client_handler_args) {
             if (!ready_sock_server_seq2(client, client_handler_args->data_len)) {
                 if (!ready_sock_server_seq3(client)) {
                     client->status |= RA_NODE_CONNECTED;
-                    printf("Preparing socket sequence has been Successfully Completed.");
+                    RA_INFO("Preparing socket sequence has been Successfully Completed.\n");
                 }
                 else {
-                    printf("Error: A crypto preparation sequence Failed.\n");
+                    RA_WARN("Error: A crypto preparation sequence Failed.\n");
                     continue;
                 }
             } else {
-                printf("Error: A server socket preparation sequence Failed.\n");
+                RA_WARN("Error: A server socket preparation sequence Failed.\n");
                 continue;
             }
         } else {
-            printf("Error: A client socket preparation sequence Failed.\n");
+            RA_WARN("Error: A client socket preparation sequence Failed.\n");
             continue;
         }
 
-        printf("\nStarted Sending Opus Packets...\n");
+        RA_INFO("Started Sending Opus Packets...\n");
         fflush(stdout);
 
         pthread_mutex_lock(complete_init_client_mutex);
@@ -363,19 +364,19 @@ void *ra_server(void *p_server) {
                                   OPUS_APPLICATION,
                                   &err);
     if (err < 0) {
-        printf("Error: failed to create an encoder - %s\n", opus_strerror(err));
+        RA_ERROR("Error: failed to create an encoder - %s\n", opus_strerror(err));
         return (void *) RA_SERVER_CREATE_OPUS_ENCODER_FAILED;
     }
 
     if (opus_encoder_ctl(encoder,
                          OPUS_SET_BITRATE(OPUS_AUDIO_SR * OPUS_AUDIO_CH)) <
         0) {
-        printf("Error: failed to set bitrate - %s\n", opus_strerror(err));
+        RA_ERROR("Error: failed to set bitrate - %s\n", opus_strerror(err));
         return (void *) RA_SERVER_OPUS_ENCODER_CTL_FAILED;
     }
 
     err = server_init_socket(server, idx);
-    if(err == -1)
+    if(err != 0)
         return (void *) (uintptr_t) err;
 
     int client_count = 0;

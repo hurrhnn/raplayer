@@ -26,4 +26,6 @@
 
 #define EOS "EOS"
 
+#cmakedefine01 RAPLAYER_ENABLE_DEBUG
+
 #endif //RAPLAYER_CONFIG_H
