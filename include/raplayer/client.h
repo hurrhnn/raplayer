@@ -32,10 +32,42 @@
 #include <pthread.h>
 #include <opus/opus.h>
 #include <raplayer/config.h>
+#include <raplayer/task_queue.h>
 
 #ifndef RAPLAYER_RA_CLIENT_H
 #define RAPLAYER_RA_CLIENT_H
 
-int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void* user_data), void* callback_user_data, int *client_status);
+typedef struct {
+    struct {
+        char* address;
+        int port;
+        void(*frame_callback) (void *frame, int frame_size, void* user_data);
+        void* callback_user_data;
+
+        int sock_fd;
+        struct sockaddr_in server_addr;
+        struct {
+            uint16_t channels;
+            int32_t sample_rate;
+            uint16_t bit_per_sample;
+        };
+        int status;
+        pthread_t thread;
+    } *list;
+    uint64_t idx;
+} ra_client_t;
+
+#define RA_CLIENT_NOT_CONNECTED 0
+#define RA_CLIENT_INIT_FAILED 1
+#define RA_CLIENT_CONNECTED 2
+#define RA_CLIENT_CONNECTION_EXHAUSTED 3
+
+typedef enum {
+    RAPLAYER_SOCKET_CREATION_FAILED = 1,
+    RA_CLIENT_CONNECTION_RESOLVE_FAILED,
+    RA_CLIENT_ADDRESS_CONVERSION_FAILED,
+} ra_client_errno_t;
+
+void* ra_client(void *p_client);
 
 #endif

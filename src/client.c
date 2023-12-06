@@ -24,164 +24,132 @@
 #include <raplayer/task_queue.h>
 #include <raplayer/utils.h>
 
-struct stream_info {
-    int16_t channels;
-    int32_t sample_rate;
-    int16_t bits_per_sample;
-};
-
-struct server_socket_info {
-    int *client_status;
-    int sock_fd;
-    struct sockaddr_in *server_addr;
-    int *socket_len;
-};
-
 // TODO: make `-1` to error code
-int client_init_socket(char *server_addr, int server_port, struct sockaddr_in *p_ctx_server_addr) {
-    struct sockaddr_in ctx_server_addr = *p_ctx_server_addr;
-    int sock_fd;
+int client_init_socket(ra_client_t *client, uint64_t idx) {
+    // Create socket file descriptor.
+    if ((client->list[idx].sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+        return RAPLAYER_SOCKET_CREATION_FAILED;
 
-    // Creating socket file descriptor.
-    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-        fprintf(stdout, "Error: Socket Creation Failed.\n");
-        return -1;
-    }
-
-    memset((char *) &ctx_server_addr, 0, sizeof(ctx_server_addr));
-    ctx_server_addr.sin_family = AF_INET; // IPv4
-    ctx_server_addr.sin_port = htons((uint16_t) server_port);
+    client->list[idx].server_addr.sin_family = AF_INET;
+    client->list[idx].server_addr.sin_port = htons(client->list[idx].port);
 
     struct hostent *hostent;
     struct in_addr **addr_list;
 
-    if ((hostent = gethostbyname(server_addr)) == NULL) {
-        printf("Error: Connection Cannot resolved to %s.\n", server_addr);
-        return -1;
+    if ((hostent = gethostbyname(client->list[idx].address)) == NULL) {
+        return RA_CLIENT_CONNECTION_RESOLVE_FAILED;
     } else {
         addr_list = (struct in_addr **) hostent->h_addr_list;
-        server_addr = malloc(0x100);
-        strcpy(server_addr, inet_ntoa(*addr_list[0]));
+        char *resolved_address = malloc(0x100);
+        strcpy(resolved_address, inet_ntoa(*addr_list[0]));
 
-        if (!inet_pton(AF_INET, server_addr, &ctx_server_addr.sin_addr)) {
-            puts("Error: Convert Internet host address Failed.");
-            return -1;
-        }
+        if (!inet_pton(AF_INET, resolved_address, &client->list[idx].server_addr.sin_addr))
+            return RA_CLIENT_ADDRESS_CONVERSION_FAILED;
+        free(resolved_address);
     }
-
-    *p_ctx_server_addr = ctx_server_addr;
-    free(server_addr);
-    return sock_fd;
+    return 0;
 }
 
-uint32_t ready_sock_client_seq1(struct stream_info *streamInfo, const struct server_socket_info *p_server_socket_info) {
-    struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
+uint32_t ready_sock_client_seq1(ra_client_t *client, uint64_t idx) {
     const int buffer_size = 6;
     char *buffer = calloc(buffer_size, BYTE);
 
-    sendto(p_server_socket_info->sock_fd, HELLO, sizeof(HELLO), 0, (struct sockaddr *) &server_addr,
-           *p_server_socket_info->socket_len);
+    int sock_fd = client->list[idx].sock_fd;
+    int server_len = sizeof(struct sockaddr);
+    struct sockaddr *server_addr = (struct sockaddr *) &client->list[idx].server_addr;
+    sendto(sock_fd, HELLO, sizeof(HELLO), 0, server_addr, server_len);
 
     // Receive PCM info from server.
-    recvfrom(p_server_socket_info->sock_fd, buffer, buffer_size, 0, NULL, NULL);
+    recvfrom(sock_fd, buffer, buffer_size, 0, NULL, NULL);
     int info_len = (int) strtol(buffer, NULL, 10);
     buffer = realloc(buffer, info_len);
 
-    sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
-           *p_server_socket_info->socket_len);
-    recvfrom(p_server_socket_info->sock_fd, buffer, info_len, 0, NULL, NULL);
+    sendto(sock_fd, OK, sizeof(OK), 0, server_addr, server_len);
+    recvfrom(sock_fd, buffer, info_len, 0, NULL, NULL);
 
-    memcpy(&streamInfo->channels, buffer, WORD);
-    memcpy(&streamInfo->sample_rate, buffer + WORD, DWORD);
-    memcpy(&streamInfo->bits_per_sample, buffer + WORD + DWORD, WORD);
+    memcpy(&client->list[idx].channels, buffer, WORD);
+    memcpy(&client->list[idx].sample_rate, buffer + WORD, DWORD);
+    memcpy(&client->list[idx].bit_per_sample, buffer + WORD + DWORD, WORD);
 
     buffer = realloc(buffer, DWORD);
     sprintf(buffer, "%d", info_len);
 
-    if (sendto(p_server_socket_info->sock_fd, buffer, strlen(buffer), 0, (struct sockaddr *) &server_addr,
-               *p_server_socket_info->socket_len) > 0) {
+    if (sendto(sock_fd, buffer, strlen(buffer), 0, server_addr, server_len) > 0) {
         memset(buffer, 0, DWORD);
-        recvfrom(p_server_socket_info->sock_fd, buffer, DWORD, 0, NULL, NULL);
+        recvfrom(sock_fd, buffer, DWORD, 0, NULL, NULL);
 
         uint32_t orig_pcm_size = 0;
         memcpy(&orig_pcm_size, buffer, DWORD);
 
-        sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
-               *p_server_socket_info->socket_len);
+        sendto(sock_fd, OK, sizeof(OK), 0, server_addr, server_len);
         return orig_pcm_size;
     }
     free(buffer);
     return 0;
 }
 
-unsigned char *ready_sock_client_seq2(const struct server_socket_info *p_server_socket_info) {
-    struct sockaddr_in server_addr = *p_server_socket_info->server_addr;
+unsigned char *ready_sock_client_seq2(ra_client_t *client, uint64_t idx) {
+    int sock_fd = client->list[idx].sock_fd;
+
     const int crypto_payload_size = CHACHA20_NONCEBYTES + CHACHA20_KEYBYTES;
     unsigned char *crypto_payload = malloc(crypto_payload_size);
 
     if (crypto_payload_size ==
-        recvfrom(p_server_socket_info->sock_fd, crypto_payload, crypto_payload_size, 0, NULL, NULL)) {
-        sendto(p_server_socket_info->sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &server_addr,
-               (socklen_t) *p_server_socket_info->socket_len);
+        recvfrom(sock_fd, crypto_payload, crypto_payload_size, 0, NULL, NULL)) {
+        sendto(sock_fd, OK, sizeof(OK), 0, (struct sockaddr *) &client->list[idx].server_addr, sizeof(struct sockaddr));
         return crypto_payload;
     }
     return NULL;
 }
 
-void *send_heartbeat(void *p_server_socket_info) {
-    struct server_socket_info *server_socket_info = p_server_socket_info;
+void *send_heartbeat(void *p_client) {
+    ra_client_t *client = p_client;
     struct timespec timespec;
     timespec.tv_sec = 0;
     timespec.tv_nsec = 250000000;
 
-    while (!(*server_socket_info->client_status)) {
-        sendto(server_socket_info->sock_fd, HEARTBEAT, sizeof(HEARTBEAT), 0,
-               (const struct sockaddr *) server_socket_info->server_addr,
-               *server_socket_info->socket_len);
+    while (client->list[0].status == RA_CLIENT_CONNECTED) {
+        sendto(client->list[0].sock_fd, HEARTBEAT, sizeof(HEARTBEAT), 0,
+               (struct sockaddr *) &client->list[0].server_addr,
+               sizeof(struct sockaddr));
         nanosleep(&timespec, NULL);
     }
     return EXIT_SUCCESS;
 }
 
-int ra_client(char *address, int port, void (*frame_callback)(void *frame, int frame_size, void *user_data),
-              void *callback_user_data, int *client_status) {
+void* ra_client(void *p_client) {
+    ra_client_t *client = p_client;
+    uint64_t idx = client->idx;
+
     int err;
-    struct stream_info pStreamInfo;
-    struct sockaddr_in server_addr;
 
-    int sock_fd = client_init_socket(address, port, &server_addr);
-    int socket_len = sizeof(server_addr);
-
-    struct server_socket_info server_socket_info;
-    server_socket_info.client_status = client_status;
-    server_socket_info.sock_fd = sock_fd;
-    server_socket_info.server_addr = &server_addr;
-    server_socket_info.socket_len = &socket_len;
-
-    ready_sock_client_seq1(&pStreamInfo, &server_socket_info);
+    client_init_socket(client, idx);
+    ready_sock_client_seq1(client, idx);
 
     struct chacha20_context ctx;
-    unsigned char *crypto_payload = ready_sock_client_seq2(&server_socket_info);
+    unsigned char *crypto_payload = ready_sock_client_seq2(client, idx);
 
     OpusDecoder *decoder; /* Create a new decoder state */
-    decoder = opus_decoder_create(pStreamInfo.sample_rate, pStreamInfo.channels, &err);
+    decoder = opus_decoder_create(client->list[idx].sample_rate, client->list[idx].channels, &err);
     if (err < 0) {
         printf("Error: failed to create an decoder - %s\n", opus_strerror(err));
-        return EXIT_FAILURE;
+        client->list[idx].status = RA_CLIENT_INIT_FAILED;
+        return (void *) EXIT_FAILURE;
     }
 
-    *client_status = 0;
+    client->list[idx].status = RA_CLIENT_CONNECTED;
     pthread_t heartbeat_sender;
-    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) &server_socket_info); // Activate heartbeat sender.
+    pthread_create(&heartbeat_sender, NULL, send_heartbeat, (void *) client); // Activate heartbeat sender. //TODO: MEMFIX
     chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
     unsigned char c_bits[MAX_DATA_SIZE];
     unsigned char **calculated_c_bits = malloc(sizeof(void *));
-    opus_int16 out[FRAME_SIZE * pStreamInfo.channels];
-    unsigned char pcm_bytes[FRAME_SIZE * pStreamInfo.channels * WORD];
+
+    opus_int16 *out = malloc(FRAME_SIZE * client->list[idx].channels);
+    unsigned char *pcm_bytes = malloc(FRAME_SIZE * BYTE * client->list[idx].channels);
     while (true) {
-        recvfrom(sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
-        if (*client_status || (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S')) { // Detect End of Stream.
-            *client_status = 1;
+        recvfrom(client->list[idx].sock_fd, c_bits, sizeof(c_bits), 0, NULL, NULL);
+        if (client->list[idx].status || (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S')) { // Detect End of Stream.
+            client->list[idx].status = 1;
             break;
         }
 
@@ -196,16 +164,16 @@ int ra_client(char *address, int port, void (*frame_callback)(void *frame, int f
                                      FRAME_SIZE, 0);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
-            return EXIT_FAILURE;
+            return (void *) EXIT_FAILURE;
         }
 
         /* Convert to little-endian ordering. */
-        for (int i = 0; i < pStreamInfo.channels * frame_size; i++) {
+        for (int i = 0; i < client->list[idx].channels * frame_size; i++) {
             pcm_bytes[2 * i] = out[i] & 0xFF;
             pcm_bytes[2 * i + 1] = (out[i] >> 8) & 0xFF;
         }
         // TODO: implement the client-side time synchronized callback
-        frame_callback(pcm_bytes, frame_size, callback_user_data);
+        client->list[idx].frame_callback(pcm_bytes, frame_size, client->list[idx].callback_user_data);
     }
     /* Cleaning up. */
     free(calculated_c_bits);
