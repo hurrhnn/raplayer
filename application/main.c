@@ -284,9 +284,6 @@ void client_frame_callback(void *frame, int frame_size, void *user_args) {
 
 uint8_t *server_frame_callback(void *user_args) {
     void **callback_user_data_args = user_args;
-    if(feof((void *) callback_user_data_args[1]))
-        raplayer_set_server_status((void *) callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED);
-
     fread((void *) callback_user_data_args[2], WORD * OPUS_AUDIO_CH, FRAME_SIZE, (void *) callback_user_data_args[1]);
     return callback_user_data_args[2];
 }
@@ -372,7 +369,10 @@ int main(int argc, char **argv) {
         pthread_create(&info_printer, NULL, print_info, p_callback_user_data_args); // Activate info printer.
         pthread_create(&volume_controller, NULL, control_volume,
                        p_callback_user_data_args); // Activate volume controller.
-        raplayer_wait_client(&raplayer, id);
+
+        int32_t status = raplayer_wait_client(&raplayer, id);
+        if(status != 0)
+            printf("Client finished with exit code %d, %s.\n", status, raplayer_strerror(status));
 
         Pa_StopStream(stream);
         Pa_CloseStream(stream);
@@ -467,8 +467,9 @@ int main(int argc, char **argv) {
         p_callback_user_data_args[2] = malloc(FRAME_SIZE * OPUS_AUDIO_CH * WORD);
 
         uint64_t id = raplayer_spawn_server(&raplayer, port, server_frame_callback, p_callback_user_data_args);
-        raplayer_wait_server(&raplayer, id);
-        raplayer_set_server_status(&raplayer, id, 1);
+        int32_t status = raplayer_wait_server(&raplayer, id);
+        if(status != 0)
+            printf("Server stopped with exit code %d, %s.\n", status, raplayer_strerror(status));
 
         free(p_callback_user_data_args[2]);
     }
