@@ -1,4 +1,19 @@
 #include <raplayer/utils.h>
+#include <raplayer/client.h>
+
+const char *raplayer_strerror(int err) {
+    switch (err) {
+        case RAPLAYER_SOCKET_CREATION_FAILED:
+            return "Socket Creation Failed";
+        case RA_CLIENT_CONNECTION_RESOLVE_FAILED:
+            return "Connection Cannot resolved to address";
+        case RA_CLIENT_ADDRESS_CONVERSION_FAILED:
+            return "Convert internet host address Failed";
+        default:
+            return "Unknown error occurred.";
+    }
+    return NULL;
+}
 
 uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result) {
     long unsigned int idx = 0;

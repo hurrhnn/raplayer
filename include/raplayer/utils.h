@@ -1,9 +1,11 @@
 #ifndef RAPLAYER_UTILS_H
 #define RAPLAYER_UTILS_H
 
-#include <raplayer/config.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <sys/socket.h>
+#include <raplayer/config.h>
+#include <raplayer/task_queue.h>
 
 #ifdef __ANDROID__
 #ifndef RAPLAYER_ANDROID_WORKAROUND
@@ -21,6 +23,8 @@
 #define pthread_setcancelstate(foo, bar) pthread_setcanceltype(foo, bar)
 #endif
 #endif /* __ANDROID__ */
+
+const char *raplayer_strerror(int err);
 
 uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result);
 
