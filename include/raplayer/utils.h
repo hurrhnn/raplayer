@@ -116,7 +116,7 @@ do {                                  \
 #define RA_DEBUG_MORE(CLR, fmt, ...) do {} while (0)
 
 #define RA_INFO(fmt, ...) \
-    RA_LOGGER_PRINTF(##__VA_ARGS__)
+    RA_LOGGER_PRINTF(fmt, ##__VA_ARGS__)
 #define RA_WARN(fmt, ...) \
     RA_LOGGER_PRINTF("%s" fmt "%s", STR_YEL, ##__VA_ARGS__, STR_RST)
 #define RA_ERROR(fmt, ...) \

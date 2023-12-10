@@ -67,7 +67,6 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                 if (node_id == -1) {
                     int local_sock_idx = -1;
                     for (int j = 0; j < *ra_packet_scheduler_args->cnt_local_sock; j++) {
-                        printf("%llu\n", local_sock[j]->fd);
                         if (fds[i].fd == local_sock[j]->fd) {
                             local_sock_idx = j;
                             break;

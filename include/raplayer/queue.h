@@ -1,4 +1,4 @@
-include/raplayer/queue.h/*
+/*
  raplayer is a cross-platform remote audio player, written from the scratch.
  This file is part of raplayer.
 
