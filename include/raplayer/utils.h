@@ -1,10 +1,13 @@
 #ifndef RAPLAYER_UTILS_H
 #define RAPLAYER_UTILS_H
+#include <raplayer/config.h>
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 #include <sys/socket.h>
-#include <raplayer/config.h>
+#include <netinet/in.h>
+#include <stdbool.h>
 
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
     defined(__BIG_ENDIAN__) || \
@@ -42,29 +45,25 @@
 #endif
 #endif /* __ANDROID__ */
 
-typedef enum {
-    RAPLAYER_SOCKET_CREATION_FAILED = 1,
-    RA_CLIENT_CONNECTION_RESOLVE_FAILED,
-    RA_CLIENT_ADDRESS_CONVERSION_FAILED,
-    RA_CLIENT_SOCKET_INIT_SEQ1_FAILED,
-    RA_CLIENT_SOCKET_INIT_SEQ2_FAILED,
-    RA_CLIENT_CREATE_OPUS_DECODER_FAILED,
-    RA_CLIENT_OPUS_DECODE_FAILED,
-    RA_SERVER_SOCKET_BIND_FAILED,
-    RA_SERVER_SOCKET_INIT_SEQ1_FAILED,
-    RA_SERVER_SOCKET_INIT_SEQ2_FAILED,
-    RA_SERVER_SOCKET_INIT_SEQ3_FAILED,
-    RA_SERVER_CREATE_OPUS_ENCODER_FAILED,
-    RA_SERVER_OPUS_ENCODER_CTL_FAILED,
-    RA_SERVER_OPUS_ENCODE_FAILED,
-} raplayer_errno_t;
+#if defined(WIN32) || defined(_WIN32) || defined(_WIN64) || defined(__WIN32) && !defined(__CYGWIN__)
+#define RA_MS_WINDOWS
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#elif defined(__APPLE__) || defined(__MACH__)
+#define RA_MAC_OS_X
+#elif defined(__linux__)
+#define RA_LINUX
+#elif defined(__FreeBSD__)
+#define RA_FREEBSD
+#elif defined(__unix) || defined(__unix__)
+#define RA_UNIX
+#endif
 
-typedef enum {
-    RA_NODE_INITIATED = (1 << 0),
-    RA_NODE_CONNECTED = (1 << 1),
-    RA_NODE_CONNECTION_EXHAUSTED = (1 << 2),
-    RA_NODE_HEARTBEAT_RECEIVED = (1 << 3),
-} ra_node_status_t;
+#ifdef RA_MS_WINDOWS
+#define __FILENAME__ (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : __FILE__)
+#else
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#endif
 
 #define STR_RST   "\x1B[0m"
 #define STR_RED   "\x1B[31m"
@@ -104,7 +103,7 @@ do {                                  \
 #define RA_DEBUG(CLR, fmt, ...) \
     RA_LOGGER_PRINTF("%s" fmt "%s", (RA_DEBUG_COLOR(CLR)), ##__VA_ARGS__, STR_RST)
 #define RA_DEBUG_MORE(CLR, fmt, ...) \
-    RA_LOGGER_PRINTF("%s[%s:%02d]: %s() - " fmt "%s", (RA_DEBUG_COLOR(CLR)), __FILE_NAME__, __LINE__, __func__, ##__VA_ARGS__, STR_RST)
+    RA_LOGGER_PRINTF("%s[%s:%02d]: %s() - " fmt "%s", (RA_DEBUG_COLOR(CLR)), __FILENAME__, __LINE__, __func__, ##__VA_ARGS__, STR_RST)
 
 #define RA_INFO(fmt, ...) \
     RA_DEBUG_MORE(NO_COLOR, fmt, ##__VA_ARGS__)
@@ -124,8 +123,50 @@ do {                                  \
     RA_LOGGER_PRINTF("%s" fmt "%s", STR_RED, ##__VA_ARGS__, STR_RST)
 #endif
 
+#define ra_realloc(addr, size) \
+    if((addr = realloc(addr, size)) == NULL) { \
+        RA_ERROR("realloc() return address was NULL!\n"); \
+        exit(EXIT_FAILURE); \
+    } \
+
+typedef enum {
+    RA_SOCKET_CREATION_FAILED = INT_MIN,
+    RA_CONNECTION_RESOLVE_FAILED,
+    RA_ADDRESS_CONVERSION_FAILED,
+    RA_SOCKET_INIT_SEQ1_FAILED,
+    RA_SOCKET_INIT_SEQ2_FAILED,
+    RA_SOCKET_INIT_SEQ3_FAILED,
+    RA_CREATE_OPUS_DECODER_FAILED,
+    RA_OPUS_DECODE_FAILED,
+    RA_SOCKET_BIND_FAILED,
+    RA_CREATE_OPUS_ENCODER_FAILED,
+    RA_OPUS_ENCODER_CTL_FAILED,
+    RA_OPUS_ENCODE_FAILED,
+} raplayer_errno_t;
+
+typedef enum {
+    RA_NODE_INITIATED = (1 << 0),
+    RA_NODE_CONNECTED = (1 << 1),
+    RA_NODE_CONNECTION_EXHAUSTED = (1 << 2),
+    RA_NODE_HEARTBEAT_RECEIVED = (1 << 3),
+} ra_node_status_t;
+
+typedef struct {
+    uint64_t fd;
+    struct sockaddr_in addr;
+} ra_sock_local_t;
+
+typedef struct {
+    ra_sock_local_t *local_sock;
+    struct sockaddr_in addr;
+} ra_sock_remote_t;
+
 const char *raplayer_strerror(int err);
 
-uint64_t provide_20ms_opus_offset_calculator(unsigned char c_bits[MAX_DATA_SIZE], unsigned char **result);
+u_int16_t ra_swap_endian_uint16(u_int16_t number);
+
+u_int32_t ra_swap_endian_uint32(u_int32_t number);
+
+bool ra_compare_sockaddr(struct sockaddr_in *s1, struct sockaddr_in *s2);
 
 #endif //RAPLAYER_UTILS_H
