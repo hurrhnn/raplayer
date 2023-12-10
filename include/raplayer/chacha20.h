@@ -41,7 +41,7 @@ struct chacha20_context
     uint8_t key[CHACHA20_KEYBYTES];
 
     uint32_t state[16];
-};
+} __attribute__((aligned(1), packed));
 
 unsigned char *generate_random_bytestream(size_t num_bytes);
 
