@@ -18,8 +18,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RAPLAYER_TASK_SCHEDULER_H
-#define RAPLAYER_TASK_SCHEDULER_H
+#ifndef RAPLAYER_SCHEDULER_H
+#define RAPLAYER_SCHEDULER_H
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -28,37 +28,28 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <stdio.h>
+#include <sys/poll.h>
 #include <raplayer/task_queue.h>
 #include <raplayer/chacha20.h>
+#include <raplayer/node.h>
 
 typedef struct {
-    int sock_fd;
-    int *client_count;
-    ra_node_t **client_context;
+    struct pollfd **fds;
+    uint64_t *cnt_fds;
 
-    pthread_mutex_t *complete_init_queue_mutex;
-    pthread_cond_t *complete_init_queue_cond;
+    uint64_t *cnt_local_sock;
+    ra_sock_local_t ***local_sock;
 
-    pthread_rwlock_t *client_context_rwlock;
-} task_scheduler_info_t;
+    uint64_t *cnt_remote_sock;
+    ra_sock_remote_t ***remote_sock;
 
-typedef struct {
-    uint8_t *status;
-    int *client_count;
-    ra_node_t **client_context;
+    ra_node_t ***node;
+    uint64_t *cnt_node;
 
-    uint32_t data_len;
-    int is_sender_ready;
+    ra_spawn_t ***spawn;
+    uint64_t *cnt_spawn;
+} ra_packet_scheduler_args_t;
 
-    pthread_mutex_t *complete_init_mutex[2];
-    pthread_mutex_t *opus_sender_mutex;
-
-    pthread_cond_t *complete_init_cond[2];
-    pthread_cond_t *opus_sender_cond;
-
-    pthread_rwlock_t *client_context_rwlock;
-} client_handler_args_t;
-
-_Noreturn void *schedule_task(void *p_task_scheduler_args);
+_Noreturn void *schedule_packet(void *);
 
 #endif
