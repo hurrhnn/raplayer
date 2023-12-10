@@ -1,4 +1,4 @@
-/*
+include/raplayer/queue.h/*
  raplayer is a cross-platform remote audio player, written from the scratch.
  This file is part of raplayer.
 
@@ -42,17 +42,17 @@ typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t empty, fill;
 
-} ra_task_queue_t;
+} ra_queue_t;
 
-void init_queue(ra_task_queue_t *q);
+void init_queue(ra_queue_t *q);
 
-int is_full(const ra_task_queue_t *q);
+int is_full(const ra_queue_t *q);
 
-int is_empty(const ra_task_queue_t *q);
+int is_empty(const ra_queue_t *q);
 
-bool append_task(ra_task_queue_t *q, ra_task_t *task);
+bool append_task(ra_queue_t *q, ra_task_t *task);
 
-ra_task_t *retrieve_task(ra_task_queue_t *q);
+ra_task_t *retrieve_task(ra_queue_t *q);
 
 ra_task_t* create_task(uint32_t len);
 

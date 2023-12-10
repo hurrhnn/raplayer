@@ -3,7 +3,7 @@
 
 #include <raplayer/utils.h>
 #include <raplayer/chacha20.h>
-#include <raplayer/task_queue.h>
+#include <raplayer/queue.h>
 #include <raplayer/scheduler.h>
 #include <raplayer/dispatcher.h>
 

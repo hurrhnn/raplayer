@@ -29,7 +29,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <sys/poll.h>
-#include <raplayer/task_queue.h>
+#include <raplayer/queue.h>
 #include <raplayer/chacha20.h>
 #include <raplayer/node.h>
 

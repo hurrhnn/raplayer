@@ -20,7 +20,7 @@
 
 #include <raplayer/config.h>
 #include <raplayer/scheduler.h>
-#include <raplayer/task_queue.h>
+#include <raplayer/queue.h>
 #include <raplayer/dispatcher.h>
 #include <raplayer/node.h>
 
@@ -114,9 +114,9 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     node[*ra_packet_scheduler_args->cnt_node]->sample_rate = 48000;
                     node[*ra_packet_scheduler_args->cnt_node]->channels = 2;
                     node[*ra_packet_scheduler_args->cnt_node]->bit_per_sample = 16;
-                    node[*ra_packet_scheduler_args->cnt_node]->recv_queue = malloc(sizeof(ra_task_queue_t));
-                    node[*ra_packet_scheduler_args->cnt_node]->send_queue = malloc(sizeof(ra_task_queue_t));
-                    node[*ra_packet_scheduler_args->cnt_node]->frame_queue = malloc(sizeof(ra_task_queue_t));
+                    node[*ra_packet_scheduler_args->cnt_node]->recv_queue = malloc(sizeof(ra_queue_t));
+                    node[*ra_packet_scheduler_args->cnt_node]->send_queue = malloc(sizeof(ra_queue_t));
+                    node[*ra_packet_scheduler_args->cnt_node]->frame_queue = malloc(sizeof(ra_queue_t));
 
                     init_queue(node[*ra_packet_scheduler_args->cnt_node]->recv_queue);
                     init_queue(node[*ra_packet_scheduler_args->cnt_node]->send_queue);

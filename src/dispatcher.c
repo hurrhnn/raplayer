@@ -1,6 +1,6 @@
 #include <raplayer/dispatcher.h>
 #include <raplayer/node.h>
-#include <raplayer/task_queue.h>
+#include <raplayer/queue.h>
 
 void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
     ra_node_t *node = p_ra_packet_dispatcher_args;

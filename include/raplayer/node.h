@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <opus/opus.h>
 #include <pthread.h>
-#include <raplayer/task_queue.h>
+#include <raplayer/queue.h>
 
 #define RA_SPAWN_TYPE_SEND 0
 #define RA_SPAWN_TYPE_RECV 1
@@ -35,9 +35,9 @@ typedef struct {
 
     struct chacha20_context crypto_context;
 
-    ra_task_queue_t *recv_queue;
-    ra_task_queue_t *send_queue;
-    ra_task_queue_t *frame_queue;
+    ra_queue_t *recv_queue;
+    ra_queue_t *send_queue;
+    ra_queue_t *frame_queue;
 } ra_node_t;
 
 typedef struct {
