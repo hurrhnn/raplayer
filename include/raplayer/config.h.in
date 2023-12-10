@@ -9,9 +9,10 @@
 #define WORD 2
 #define DWORD 4
 
-#define OK "OK"
-#define HELLO "HELLO"
-#define HEARTBEAT "HEARTBEAT"
+#define RA_OK 0
+#define RA_INVALID -1
+
+#define RA_CTL_HEADER "\x53\x82\x37\x28"
 
 #define FRAME_SIZE 960
 #define MAX_DATA_SIZE 4096

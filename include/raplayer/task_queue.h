@@ -44,18 +44,6 @@ typedef struct {
 
 } ra_task_queue_t;
 
-typedef struct {
-    ra_node_status_t status;
-    uint64_t node_id;
-    int sock_fd;
-    struct sockaddr_in node_addr;
-    socklen_t socket_len;
-    struct chacha20_context crypto_context;
-
-    ra_task_queue_t *recv_queue;
-    ra_task_queue_t *send_queue;
-} ra_node_t;
-
 void init_queue(ra_task_queue_t *q);
 
 int is_full(const ra_task_queue_t *q);
