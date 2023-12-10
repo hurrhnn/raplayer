@@ -20,6 +20,10 @@
 
 #include <raplayer.h>
 #include <portaudio.h>
+#include <termios.h>
+#include <math.h>
+#include <sys/errno.h>
+#include <fcntl.h>
 
 struct pcm_header {
     char chunk_id[4];
@@ -92,179 +96,179 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
     fread(&pPcm->pcmDataChunk.chunk_size, DWORD, 1, fin);
 }
 
-struct termios orig_termios;
-
-void reset_terminal_mode() {
-    tcsetattr(0, TCSANOW, &orig_termios);
-}
-
-void set_conio_terminal_mode() {
-    struct termios new_termios;
-
-    /* take two copies - one for now, one for later */
-    tcgetattr(0, &orig_termios);
-    memcpy(&new_termios, &orig_termios, sizeof(new_termios));
-
-    /* register cleanup handler, and set the new terminal mode */
-    atexit(&reset_terminal_mode);
-    cfmakeraw(&new_termios);
-    tcsetattr(0, TCSANOW, &new_termios);
-}
-
-int kbhit() {
-    struct timeval timeval = {0, 0};
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(STDIN_FILENO, &fds);
-    return select(1, &fds, NULL, NULL, &timeval);
-}
-
-int getch() {
-    int result;
-    unsigned char ch;
-    if ((result = (int) read(STDIN_FILENO, &ch, sizeof(ch))) < 0) {
-        return result;
-    } else {
-        return ch;
-    }
-}
-
-void *pthread_receive_signal(void *p_pthread_signal_args) {
-    void **callback_user_data_args = p_pthread_signal_args;
-    pthread_cond_t *p_cond = (pthread_cond_t *) callback_user_data_args[1];
-    pthread_mutex_t *p_mutex = (pthread_mutex_t *) callback_user_data_args[2];
-    int *pthread_status = (int *) callback_user_data_args[3];
-
-    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
-        pthread_mutex_lock(p_mutex);
-        pthread_cond_wait(p_cond, p_mutex);
-        *pthread_status = 1;
-
-        pthread_mutex_unlock(p_mutex);
-    }
-    return NULL;
-}
-
-void *change_symbol(void *p_symbol_args) {
-    void **callback_user_data_args = p_symbol_args;
-    char *symbol = (char *) callback_user_data_args[1];
-
-    int symbol_cnt = 0;
-    char symbols[] = {'-', '\\', '|', '/'};
-    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
-        *((char *) symbol) = symbols[symbol_cnt++ % DWORD];
-
-        struct timespec timespec;
-        timespec.tv_sec = 0;
-        timespec.tv_nsec = 250000000;
-        nanosleep(&timespec, NULL);
-    }
-    return NULL;
-}
-
-void *print_info(void *p_callback_user_data_args) {
-    void **callback_user_data_args = p_callback_user_data_args;
-    const double *volume = (double *) callback_user_data_args[1];
-    uint64_t *sum_frame_cnt = (uint64_t *) callback_user_data_args[2];
-    uint64_t *sum_frame_size = (uint64_t *) callback_user_data_args[3];
-
-    int print_volume_remain_cnt = 0;
-    int volume_status = 0;
-    char symbol;
-
-    set_conio_terminal_mode();
-
-    void **p_symbol_args = calloc(sizeof(void *), WORD);
-    p_symbol_args[0] = callback_user_data_args[0];
-    p_symbol_args[1] = &symbol;
-
-    void **p_pthread_signal_args = calloc(sizeof(void *), DWORD);
-    p_pthread_signal_args[0] = callback_user_data_args[0];
-    p_pthread_signal_args[1] = callback_user_data_args[4];
-    p_pthread_signal_args[2] = callback_user_data_args[5];
-    p_pthread_signal_args[3] = &volume_status;
-
-    pthread_t pthread_signal_receiver;
-    pthread_t symbol_changer;
-    pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, p_pthread_signal_args);
-    pthread_create(&symbol_changer, NULL, change_symbol, p_symbol_args);
-
-    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTED));
-    printf("Preparing socket sequence has been Successfully Completed.");
-    printf("\n\rStarted Playing Opus Packets...\n\n\r");
-
-    while (!(raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED))) {
-        if (volume_status) {
-            volume_status = 0;
-            print_volume_remain_cnt = 20;
-        }
-
-        if (print_volume_remain_cnt > 0) {
-            if (*volume >= 1)
-                printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB, Muted%*c\r", symbol,
-                       (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
-            else
-                printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB, %0.f%%%*c\r", symbol,
-                       (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, ((1 - *volume) * 100),
-                       8, ' ');
-            print_volume_remain_cnt--;
-        } else
-            printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB%*c\r", symbol,
-                   (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
-
-        fflush(stdout);
-
-        struct timespec timespec;
-        timespec.tv_sec = 0;
-        timespec.tv_nsec = 50000000;
-        nanosleep(&timespec, NULL);
-    }
-
-    pthread_cond_signal(callback_user_data_args[4]);
-    pthread_join(pthread_signal_receiver, NULL);
-    pthread_join(symbol_changer, NULL);
-
-    printf("[*] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB%*c\n\r",
-           (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
-    return EXIT_SUCCESS;
-}
-
-void *control_volume(void *p_callback_user_data_args) {
-    void **callback_user_data_args = p_callback_user_data_args;
-    double *volume = (double *) callback_user_data_args[1];
-    pthread_cond_t *print_volume_cond = (pthread_cond_t *) callback_user_data_args[4];
-
-    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
-        if (kbhit()) {
-            switch (getch()) {
-                case '\033':
-                    getch(); /* skip the '[' */
-                    switch (getch()) { /* the real value */
-                        case 'A':
-                            *volume = ((*volume - 0.01 < -0.01) ? *volume : *volume - 0.01); /* Increase volume. */
-                            pthread_cond_signal(print_volume_cond);
-                            break;
-                        case 'B':
-                            *volume = ((*volume + 0.01 > 1.01) ? *volume : *volume + 0.01); /* Decrease volume. */
-                            pthread_cond_signal(print_volume_cond);
-                            break;
-                        default:
-                            break;
-                    }
-                    break;
-
-                case 0x03:
-                case 0x1A:
-                    raplayer_set_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED);
-                    break;
-
-                default:
-                    break;
-            }
-        }
-    }
-    return NULL;
-}
+//struct termios orig_termios;
+//
+//void reset_terminal_mode() {
+//    tcsetattr(0, TCSANOW, &orig_termios);
+//}
+//
+//void set_conio_terminal_mode() {
+//    struct termios new_termios;
+//
+//    /* take two copies - one for now, one for later */
+//    tcgetattr(0, &orig_termios);
+//    memcpy(&new_termios, &orig_termios, sizeof(new_termios));
+//
+//    /* register cleanup handler, and set the new terminal mode */
+//    atexit(&reset_terminal_mode);
+//    cfmakeraw(&new_termios);
+//    tcsetattr(0, TCSANOW, &new_termios);
+//}
+//
+//int kbhit() {
+//    struct timeval timeval = {0, 0};
+//    fd_set fds;
+//    FD_ZERO(&fds);
+//    FD_SET(STDIN_FILENO, &fds);
+//    return select(1, &fds, NULL, NULL, &timeval);
+//}
+//
+//int getch() {
+//    int result;
+//    unsigned char ch;
+//    if ((result = (int) read(STDIN_FILENO, &ch, sizeof(ch))) < 0) {
+//        return result;
+//    } else {
+//        return ch;
+//    }
+//}
+//
+//void *pthread_receive_signal(void *p_pthread_signal_args) {
+//    void **callback_user_data_args = p_pthread_signal_args;
+//    pthread_cond_t *p_cond = (pthread_cond_t *) callback_user_data_args[1];
+//    pthread_mutex_t *p_mutex = (pthread_mutex_t *) callback_user_data_args[2];
+//    int *pthread_status = (int *) callback_user_data_args[3];
+//
+//    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
+//        pthread_mutex_lock(p_mutex);
+//        pthread_cond_wait(p_cond, p_mutex);
+//        *pthread_status = 1;
+//
+//        pthread_mutex_unlock(p_mutex);
+//    }
+//    return NULL;
+//}
+//
+//void *change_symbol(void *p_symbol_args) {
+//    void **callback_user_data_args = p_symbol_args;
+//    char *symbol = (char *) callback_user_data_args[1];
+//
+//    int symbol_cnt = 0;
+//    char symbols[] = {'-', '\\', '|', '/'};
+//    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
+//        *((char *) symbol) = symbols[symbol_cnt++ % DWORD];
+//
+//        struct timespec timespec;
+//        timespec.tv_sec = 0;
+//        timespec.tv_nsec = 250000000;
+//        nanosleep(&timespec, NULL);
+//    }
+//    return NULL;
+//}
+//
+//void *print_info(void *p_callback_user_data_args) {
+//    void **callback_user_data_args = p_callback_user_data_args;
+//    const double *volume = (double *) callback_user_data_args[1];
+//    uint64_t *sum_frame_cnt = (uint64_t *) callback_user_data_args[2];
+//    uint64_t *sum_frame_size = (uint64_t *) callback_user_data_args[3];
+//
+//    int print_volume_remain_cnt = 0;
+//    int volume_status = 0;
+//    char symbol;
+//
+//    set_conio_terminal_mode();
+//
+//    void **p_symbol_args = calloc(sizeof(void *), WORD);
+//    p_symbol_args[0] = callback_user_data_args[0];
+//    p_symbol_args[1] = &symbol;
+//
+//    void **p_pthread_signal_args = calloc(sizeof(void *), DWORD);
+//    p_pthread_signal_args[0] = callback_user_data_args[0];
+//    p_pthread_signal_args[1] = callback_user_data_args[4];
+//    p_pthread_signal_args[2] = callback_user_data_args[5];
+//    p_pthread_signal_args[3] = &volume_status;
+//
+//    pthread_t pthread_signal_receiver;
+//    pthread_t symbol_changer;
+//    pthread_create(&pthread_signal_receiver, NULL, pthread_receive_signal, p_pthread_signal_args);
+//    pthread_create(&symbol_changer, NULL, change_symbol, p_symbol_args);
+//
+//    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTED));
+//    printf("Preparing socket sequence has been Successfully Completed.");
+//    printf("\n\rStarted Playing Opus Packets...\n\n\r");
+//
+//    while (!(raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED))) {
+//        if (volume_status) {
+//            volume_status = 0;
+//            print_volume_remain_cnt = 20;
+//        }
+//
+//        if (print_volume_remain_cnt > 0) {
+//            if (*volume >= 1)
+//                printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB, Muted%*c\r", symbol,
+//                       (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
+//            else
+//                printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB, %0.f%%%*c\r", symbol,
+//                       (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, ((1 - *volume) * 100),
+//                       8, ' ');
+//            print_volume_remain_cnt--;
+//        } else
+//            printf("[%c] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB%*c\r", symbol,
+//                   (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
+//
+//        fflush(stdout);
+//
+//        struct timespec timespec;
+//        timespec.tv_sec = 0;
+//        timespec.tv_nsec = 50000000;
+//        nanosleep(&timespec, NULL);
+//    }
+//
+//    pthread_cond_signal(callback_user_data_args[4]);
+//    pthread_join(pthread_signal_receiver, NULL);
+//    pthread_join(symbol_changer, NULL);
+//
+//    printf("[*] Elapsed time: %.2lfs, Decoded frame size: %.2lfKB%*c\n\r",
+//           (double) (*sum_frame_cnt * 20) / 1000, (double) (*sum_frame_size) / 1000, 8, ' ');
+//    return EXIT_SUCCESS;
+//}
+//
+//void *control_volume(void *p_callback_user_data_args) {
+//    void **callback_user_data_args = p_callback_user_data_args;
+//    double *volume = (double *) callback_user_data_args[1];
+//    pthread_cond_t *print_volume_cond = (pthread_cond_t *) callback_user_data_args[4];
+//
+//    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
+//        if (kbhit()) {
+//            switch (getch()) {
+//                case '\033':
+//                    getch(); /* skip the '[' */
+//                    switch (getch()) { /* the real value */
+//                        case 'A':
+//                            *volume = ((*volume - 0.01 < -0.01) ? *volume : *volume - 0.01); /* Increase volume. */
+//                            pthread_cond_signal(print_volume_cond);
+//                            break;
+//                        case 'B':
+//                            *volume = ((*volume + 0.01 > 1.01) ? *volume : *volume + 0.01); /* Decrease volume. */
+//                            pthread_cond_signal(print_volume_cond);
+//                            break;
+//                        default:
+//                            break;
+//                    }
+//                    break;
+//
+//                case 0x03:
+//                case 0x1A:
+//                    raplayer_set_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED);
+//                    break;
+//
+//                default:
+//                    break;
+//            }
+//        }
+//    }
+//    return NULL;
+//}
 
 void client_frame_callback(void *frame, int frame_size, void *user_args) {
     void **callback_user_data_args = user_args;
@@ -282,7 +286,7 @@ void client_frame_callback(void *frame, int frame_size, void *user_args) {
     (*sum_frame_size) += frame_size * WORD * OPUS_AUDIO_CH;
 }
 
-uint8_t *server_frame_callback(void *user_args) {
+void *server_frame_callback(void *user_args) {
     void **callback_user_data_args = user_args;
     fread((void *) callback_user_data_args[2], WORD * OPUS_AUDIO_CH, FRAME_SIZE, (void *) callback_user_data_args[1]);
     return callback_user_data_args[2];
@@ -361,18 +365,21 @@ int main(int argc, char **argv) {
         p_callback_user_data_args[6] = stream;
         Pa_StartStream(stream);
 
-        uint64_t id = raplayer_spawn_client(&raplayer, argv[2], port,
-                                            client_frame_callback, p_callback_user_data_args);
+        raplayer_spawn(&raplayer, RA_MODE_PEER, argv[2], port, NULL, NULL,
+                       client_frame_callback, p_callback_user_data_args);
+
         pthread_t info_printer;
         pthread_t volume_controller;
 
-        pthread_create(&info_printer, NULL, print_info, p_callback_user_data_args); // Activate info printer.
-        pthread_create(&volume_controller, NULL, control_volume,
-                       p_callback_user_data_args); // Activate volume controller.
+        while (true);
 
-        int32_t status = raplayer_wait_client(&raplayer, id);
-        if(status != 0)
-            printf("Client finished with exit code %d, %s.\n", status, raplayer_strerror(status));
+//        pthread_create(&info_printer, NULL, print_info, p_callback_user_data_args); // Activate info printer.
+//        pthread_create(&volume_controller, NULL, control_volume,
+//                       p_callback_user_data_args); // Activate volume controller.
+//
+//        int32_t status = raplayer_wait_client(&raplayer, id);
+//        if(status != 0)
+//            printf("Client finished with exit code %d, %s.\n", status, raplayer_strerror(status));
 
         Pa_StopStream(stream);
         Pa_CloseStream(stream);
@@ -466,10 +473,15 @@ int main(int argc, char **argv) {
         p_callback_user_data_args[1] = fin;
         p_callback_user_data_args[2] = malloc(FRAME_SIZE * OPUS_AUDIO_CH * WORD);
 
-        uint64_t id = raplayer_spawn_server(&raplayer, port, server_frame_callback, p_callback_user_data_args);
-        int32_t status = raplayer_wait_server(&raplayer, id);
-        if(status != 0)
-            printf("Server stopped with exit code %d, %s.\n", status, raplayer_strerror(status));
+        raplayer_spawn(&raplayer, RA_MODE_HOST, NULL, port, server_frame_callback,
+                       p_callback_user_data_args, NULL, NULL);
+
+//        uint64_t id = raplayer_spawn_server(&raplayer, port, server_frame_callback, p_callback_user_data_args);
+//        int32_t status = raplayer_wait_server(&raplayer, id);
+//        if(status != 0)
+//            printf("Server stopped with exit code %d, %s.\n", status, raplayer_strerror(status));
+
+        while (true);
 
         free(p_callback_user_data_args[2]);
     }
