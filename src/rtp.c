@@ -1,6 +1,6 @@
-#include <raplayer/utils.h>
-#include <raplayer/rtp.h>
 #include <string.h>
+#include "raplayer/utils.h"
+#include "raplayer/rtp.h"
 
 ra_rtp_t ra_get_rtp_context(void* buffer) {
     ra_rtp_t rtp_header;
@@ -11,7 +11,7 @@ ra_rtp_t ra_get_rtp_context(void* buffer) {
         rtp_header.csrc = malloc(sizeof(uint32_t) * rtp_header.csrc_count);
         uint32_t *csrc = rtp_header.csrc;
         for(int i = 0; i < rtp_header.csrc_count; i++)
-            memcpy(&csrc[i], buffer + (sizeof(rtp_header.without_csrc_data) + (i * sizeof (uint32_t))), DWORD);
+            memcpy(&csrc[i], buffer + (sizeof(rtp_header.without_csrc_data) + (i * sizeof (uint32_t))), RA_DWORD);
     } else
         rtp_header.csrc = NULL;
     return rtp_header;

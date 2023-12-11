@@ -20,12 +20,11 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <raplayer/config.h>
-#include <raplayer/chacha20.h>
-#include <raplayer/queue.h>
-#include <raplayer/scheduler.h>
-#include <raplayer/utils.h>
-#include <raplayer/rtp.h>
+#include "raplayer/chacha20.h"
+#include "raplayer/queue.h"
+#include "raplayer/scheduler.h"
+#include "raplayer/utils.h"
+#include "raplayer/rtp.h"
 
 void *ra_check_heartbeat(void *p_heartbeat_checker_args) {
     ra_node_t *node = p_heartbeat_checker_args;
@@ -59,12 +58,12 @@ void *ra_send_heartbeat(void *p_heartbeat_sender_args) {
     timespec.tv_sec = 0;
     timespec.tv_nsec = 250000000;
 
-    void* heartbeat_msg = malloc(DWORD + BYTE);
-    memcpy(heartbeat_msg, RA_CTL_HEADER, DWORD);
-    memcpy(heartbeat_msg + DWORD, "\x00", BYTE);
+    void* heartbeat_msg = malloc(RA_DWORD + RA_BYTE);
+    memcpy(heartbeat_msg, RA_CTL_HEADER, RA_DWORD);
+    memcpy(heartbeat_msg + RA_DWORD, "\x00", RA_BYTE);
 
     while (!(node->status & RA_NODE_CONNECTION_EXHAUSTED)) {
-        sendto((int) node->local_sock->fd, heartbeat_msg, DWORD + BYTE, 0,
+        sendto((int) node->local_sock->fd, heartbeat_msg, RA_DWORD + RA_BYTE, 0,
                (struct sockaddr *) &node->remote_sock->addr,
                sizeof(struct sockaddr_in));
         nanosleep(&timespec, NULL);
@@ -81,8 +80,8 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
     /* Create a new encoder state. */
     int err;
     OpusEncoder *encoder;
-    encoder = opus_encoder_create((opus_int32) OPUS_AUDIO_SR, OPUS_AUDIO_CH,
-                                  OPUS_APPLICATION,
+    encoder = opus_encoder_create((opus_int32) RA_OPUS_AUDIO_SR, RA_OPUS_AUDIO_CH,
+                                  RA_OPUS_APPLICATION,
                                   &err);
     if (err < 0) {
         RA_ERROR("Error: failed to create an encoder - %s\n", opus_strerror(err));
@@ -91,24 +90,24 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
     }
 
     if (opus_encoder_ctl(encoder,
-                         OPUS_SET_BITRATE(OPUS_AUDIO_SR * OPUS_AUDIO_CH)) <
+                         OPUS_SET_BITRATE(RA_OPUS_AUDIO_SR * RA_OPUS_AUDIO_CH)) <
         0) {
         RA_ERROR("Error: failed to set bitrate - %s\n", opus_strerror(err));
         node->status = RA_NODE_CONNECTION_EXHAUSTED;
         return (void *) RA_OPUS_ENCODER_CTL_FAILED;
     }
 
-    opus_int16 in[FRAME_SIZE * OPUS_AUDIO_CH];
-    unsigned char c_bits[FRAME_SIZE]; // TODO: need to change for correspond adaptive latency
+    opus_int16 in[RA_FRAME_SIZE * RA_OPUS_AUDIO_CH];
+    unsigned char c_bits[RA_FRAME_SIZE]; // TODO: need to change for correspond adaptive latency
 
     uint32_t sequence = 0;
     uint32_t *ssrc = (uint32_t *) generate_random_bytestream(sizeof(uint32_t));
     uint32_t timestamp = 0;
 
-    ra_spawn_t *node_spawn = NULL, **spawn = *opus_builder_args->spawn;
-    for(int i = 0; i < *opus_builder_args->cnt_spawn; i++) {
-        if(spawn[i]->type == RA_SPAWN_TYPE_SEND &&
-           ra_compare_sockaddr(&spawn[i]->local_sock->addr, &node->local_sock->addr))
+    ra_media_t *node_spawn = NULL, **spawn = *opus_builder_args->media;
+    for(int i = 0; i < *opus_builder_args->cnt_media; i++) {
+        if(spawn[i]->type == RA_MEDIA_TYPE_SEND &&
+           ra_compare_sockaddr(&spawn[i]->src_sock->addr, &node->local_sock->addr))
         {
             node_spawn = spawn[i];
             break;
@@ -137,11 +136,11 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
         unsigned char *pcm_bytes = node_spawn->callback.send(node_spawn->cb_user_data);
 
         /* Convert from little-endian ordering. */
-        for (int i = 0; i < OPUS_AUDIO_CH * FRAME_SIZE; i++)
+        for (int i = 0; i < RA_OPUS_AUDIO_CH * RA_FRAME_SIZE; i++)
             in[i] = (opus_int16) (pcm_bytes[2 * i + 1] << 8 | pcm_bytes[2 * i]);
 
         /* Encode the frame. */
-        int nbBytes = opus_encode(encoder, in, FRAME_SIZE, c_bits, FRAME_SIZE);
+        int nbBytes = opus_encode(encoder, in, RA_FRAME_SIZE, c_bits, RA_FRAME_SIZE);
         if (nbBytes < 0) {
             RA_ERROR("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
             node->status = RA_NODE_CONNECTION_EXHAUSTED;
@@ -169,7 +168,7 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
         // chacha20_xor(&crypto_context, c_bits, nbBytes); /* use client's crypto context instead of shared context */
         // chacha20_xor(&client->crypto_context, opus_frame->data + nbBytes_len + sizeof(OPUS_FLAG) - 1,nbBytes);
 
-        ra_task_t *opus_frame = create_task(MAX_DATA_SIZE);
+        ra_task_t *opus_frame = create_task(RA_MAX_DATA_SIZE);
         memset(opus_frame->data, 0x0, opus_frame->data_len);
 
         opus_frame->data_len = (ssize_t) (rtp_header_len + nbBytes);
@@ -248,8 +247,8 @@ void *ra_20ms_opus_timer(void *p_opus_timer_args) {
 
 void *ra_node_frame_receiver(void *p_node_frame_args) {
     ra_node_t *node = ((ra_node_frame_args_t *) p_node_frame_args)->node;
-    ra_spawn_t **spawn = *((ra_node_frame_args_t *) p_node_frame_args)->spawn;
-    uint64_t *cnt_spawn = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_spawn;
+    ra_media_t **spawn = *((ra_node_frame_args_t *) p_node_frame_args)->media;
+    uint64_t *cnt_spawn = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_media;
 
     int err;
     OpusDecoder *decoder; /* Create a new decoder state */
@@ -262,13 +261,13 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
 //    chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
 
     unsigned char *c_bits;
-    opus_int16 *out = malloc(FRAME_SIZE * WORD * node->channels);
-    unsigned char *pcm_bytes = malloc(FRAME_SIZE * WORD * node->channels);
+    opus_int16 *out = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
+    unsigned char *pcm_bytes = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
 
-    ra_spawn_t *node_spawn = NULL;
+    ra_media_t *node_spawn = NULL;
     for(int i = 0; i < *cnt_spawn; i++) {
-        if(spawn[i]->type == RA_SPAWN_TYPE_RECV &&
-        ra_compare_sockaddr(&spawn[i]->local_sock->addr, &node->local_sock->addr))
+        if(spawn[i]->type == RA_MEDIA_TYPE_RECV &&
+           ra_compare_sockaddr(&spawn[i]->src_sock->addr, &node->local_sock->addr))
         {
             node_spawn = spawn[i];
             break;
@@ -294,7 +293,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
 
         /* Decode the frame. */
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits,
-                                     (opus_int32) (task->data_len - rtp_header_len), out,FRAME_SIZE, 0);
+                                     (opus_int32) (task->data_len - rtp_header_len), out, RA_FRAME_SIZE, 0);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
             node->status = RA_NODE_CONNECTION_EXHAUSTED;
@@ -335,8 +334,8 @@ void *ra_node_frame_sender(void *p_node_frame_args) {
     /* Construct opus builder, sender context. */
     ra_opus_builder_args_t *p_opus_builder_args = malloc(sizeof(ra_opus_builder_args_t));
     p_opus_builder_args->node = node;
-    p_opus_builder_args->spawn = ((ra_node_frame_args_t *) p_node_frame_args)->spawn;
-    p_opus_builder_args->cnt_spawn = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_spawn;
+    p_opus_builder_args->media = ((ra_node_frame_args_t *) p_node_frame_args)->media;
+    p_opus_builder_args->cnt_media = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_media;
     p_opus_builder_args->turn = malloc(sizeof(int));
     *p_opus_builder_args->turn = 0;
     p_opus_builder_args->opus_builder_mutex = &opus_builder_mutex;

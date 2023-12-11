@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #ifndef RAPLAYER_RTP_H
 #define RAPLAYER_RTP_H
 

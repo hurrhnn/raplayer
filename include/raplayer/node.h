@@ -2,12 +2,13 @@
 #define RAPLAYER_NODE_H
 
 #include <stdint.h>
-#include <opus/opus.h>
 #include <pthread.h>
-#include <raplayer/queue.h>
+#include <opus/opus.h>
 
-#define RA_SPAWN_TYPE_SEND 0
-#define RA_SPAWN_TYPE_RECV 1
+#define RA_MEDIA_TYPE_SEND 0
+#define RA_MEDIA_TYPE_RECV 1
+
+#include "queue.h"
 
 typedef struct {
     bool type;
@@ -15,10 +16,17 @@ typedef struct {
         void *(*send)(void *user_data);
         void (*recv)(void *frame, int frame_size, void *user_data);
     } callback;
+
     void *cb_user_data;
 
-    ra_sock_local_t *local_sock;
-} ra_spawn_t;
+    struct {
+        ra_task_t frame;
+        pthread_rwlock_t rwlock;
+        uint64_t sequence;
+    } current;
+
+    ra_sock_local_t *src_sock;
+} ra_media_t;
 
 typedef struct {
     ra_node_status_t status;
@@ -42,15 +50,15 @@ typedef struct {
 
 typedef struct {
     ra_node_t *node;
-    ra_spawn_t ***spawn;
-    uint64_t *cnt_spawn;
+    ra_media_t ***media;
+    uint64_t *cnt_media;
 } ra_node_frame_args_t;
 
 typedef struct {
     ra_node_t *node;
     int *turn;
-    ra_spawn_t ***spawn;
-    uint64_t *cnt_spawn;
+    ra_media_t ***media;
+    uint64_t *cnt_media;
 
     pthread_mutex_t *opus_builder_mutex;
     pthread_cond_t *opus_builder_cond;

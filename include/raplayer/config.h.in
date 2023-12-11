@@ -3,29 +3,8 @@
 
 #define RAPLAYER_MAJOR_VERSION "@raplayer_VERSION_MAJOR@"
 #define RAPLAYER_MINOR_VERSION "@raplayer_VERSION_MINOR@"
+
 #define RAPLAYER_VERSION (RAPLAYER_MAJOR_VERSION "." RAPLAYER_MINOR_VERSION)
-
-#define BYTE 1
-#define WORD 2
-#define DWORD 4
-
-#define RA_OK 0
-#define RA_INVALID -1
-
-#define RA_CTL_HEADER "\x53\x82\x37\x28"
-
-#define FRAME_SIZE 960
-#define MAX_DATA_SIZE 4096
-
-#define OPUS_FLAG "OPUS"
-#define OPUS_AUDIO_CH 2
-#define OPUS_AUDIO_BPS 16
-#define OPUS_AUDIO_SR 48000
-#define OPUS_APPLICATION OPUS_APPLICATION_AUDIO
-
-#define MAX_QUEUE_SIZE 0x7fff
-
-#define EOS "EOS"
 
 #cmakedefine01 RAPLAYER_ENABLE_DEBUG
 

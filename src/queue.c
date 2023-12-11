@@ -18,7 +18,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <raplayer/queue.h>
+#include "raplayer/queue.h"
 
 void init_queue(ra_queue_t *q) {
     q->rear = 0;
@@ -34,7 +34,7 @@ int is_empty(const ra_queue_t *q) {
 }
 
 int is_full(const ra_queue_t *q) {
-    return ((q->rear + 1) % MAX_QUEUE_SIZE == q->front);
+    return ((q->rear + 1) % RA_MAX_QUEUE_SIZE == q->front);
 }
 
 ra_task_t* create_task(uint32_t len) {
@@ -47,7 +47,7 @@ ra_task_t* create_task(uint32_t len) {
 bool append_task(ra_queue_t *q, ra_task_t *task) {
     pthread_mutex_lock(&q->mutex);
     while (is_full(q)) { pthread_cond_wait(&q->empty, &q->mutex); }
-    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
+    q->rear = (q->rear + 1) % RA_MAX_QUEUE_SIZE;
     q->tasks[q->rear] = task;
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);
@@ -57,7 +57,7 @@ bool append_task(ra_queue_t *q, ra_task_t *task) {
 ra_task_t *retrieve_task(ra_queue_t *q) {
     pthread_mutex_lock(&q->mutex);
     while (is_empty(q)) { pthread_cond_wait(&q->fill, &q->mutex); }
-    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+    q->front = (q->front + 1) % RA_MAX_QUEUE_SIZE;
     ra_task_t *current_task = q->tasks[q->front];
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);

@@ -18,11 +18,10 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <raplayer/config.h>
-#include <raplayer/scheduler.h>
-#include <raplayer/queue.h>
-#include <raplayer/dispatcher.h>
-#include <raplayer/node.h>
+#include "raplayer/scheduler.h"
+#include "raplayer/queue.h"
+#include "raplayer/dispatcher.h"
+#include "raplayer/node.h"
 
 _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -44,8 +43,8 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
         if (poll(fds, cnt_fds, -1) == -1)
             continue;
 
-        ra_task_t *task = create_task(MAX_DATA_SIZE);
-        memset(task->data, 0x0, MAX_DATA_SIZE);
+        ra_task_t *task = create_task(RA_MAX_DATA_SIZE);
+        memset(task->data, 0x0, RA_MAX_DATA_SIZE);
 
         struct sockaddr_in remote_addr;
         socklen_t sock_len;
@@ -53,7 +52,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
 
         for (uint64_t i = 0; i < cnt_fds; i++) {
             if (fds[i].fd != -1 && fds[i].revents & POLLIN) {
-                task->data_len = recvfrom(fds[i].fd, task->data, MAX_DATA_SIZE, 0, (struct sockaddr *) &remote_addr,
+                task->data_len = recvfrom(fds[i].fd, task->data, RA_MAX_DATA_SIZE, 0, (struct sockaddr *) &remote_addr,
                                           &sock_len);
                 int node_id = -1;
                 for (int j = 0; j < *ra_packet_scheduler_args->cnt_node; j++) {
@@ -133,8 +132,8 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     pthread_t frame_sender, frame_receiver;
                     ra_node_frame_args_t *node_frame_args = malloc(sizeof(ra_node_frame_args_t));
                     node_frame_args->node = node[*ra_packet_scheduler_args->cnt_node];
-                    node_frame_args->spawn = ra_packet_scheduler_args->spawn;
-                    node_frame_args->cnt_spawn = ra_packet_scheduler_args->cnt_spawn;
+                    node_frame_args->media = ra_packet_scheduler_args->media;
+                    node_frame_args->cnt_media = ra_packet_scheduler_args->cnt_media;
 
                     /* activate node heartbeat checker & sender */
                     pthread_t heartbeat_checker, heartbeat_sender;

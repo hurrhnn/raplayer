@@ -1,6 +1,6 @@
 #ifndef RAPLAYER_UTILS_H
 #define RAPLAYER_UTILS_H
-#include <raplayer/config.h>
+#include "config.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -8,6 +8,28 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdbool.h>
+
+#define RA_MODE_HOST 0
+#define RA_MODE_PEER 1
+
+#define RA_BYTE 1
+#define RA_WORD 2
+#define RA_DWORD 4
+
+#define RA_OK 0
+#define RA_INVALID -1
+
+#define RA_CTL_HEADER "\x53\x82\x37\x28"
+
+#define RA_FRAME_SIZE 960
+#define RA_MAX_DATA_SIZE 4096
+
+#define RA_OPUS_AUDIO_CH 2
+#define RA_OPUS_AUDIO_BPS 16
+#define RA_OPUS_AUDIO_SR 48000
+#define RA_OPUS_APPLICATION OPUS_APPLICATION_AUDIO
+
+#define RA_MAX_QUEUE_SIZE 0x7fff
 
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
     defined(__BIG_ENDIAN__) || \
@@ -142,6 +164,7 @@ typedef enum {
     RA_CREATE_OPUS_ENCODER_FAILED,
     RA_OPUS_ENCODER_CTL_FAILED,
     RA_OPUS_ENCODE_FAILED,
+    RA_MEDIA_INVALID_ARGUMENT,
 } raplayer_errno_t;
 
 typedef enum {

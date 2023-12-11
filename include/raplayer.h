@@ -1,14 +1,8 @@
 #ifndef RAPLAYER_RAPLAYER_H
 #define RAPLAYER_RAPLAYER_H
 
-#include <raplayer/utils.h>
-#include <raplayer/chacha20.h>
-#include <raplayer/queue.h>
-#include <raplayer/scheduler.h>
-#include <raplayer/dispatcher.h>
-
-#define RA_MODE_HOST 0
-#define RA_MODE_PEER 1
+#include "raplayer/utils.h"
+#include "raplayer/node.h"
 
 typedef struct {
     uint64_t cnt_fds;
@@ -23,13 +17,20 @@ typedef struct {
     uint64_t cnt_node;
     ra_node_t **node;
 
-    uint64_t cnt_spawn;
-    ra_spawn_t **spawn;
+    uint64_t cnt_media;
+    ra_media_t **media;
 } raplayer_t;
 
 void raplayer_init_context(raplayer_t *raplayer);
 
-int32_t raplayer_spawn(raplayer_t *raplayer, bool mode, char *address, int port, void *(*send_callback) (void *user_data),
-                       void *send_cb_user_data, void (*recv_callback) (void *frame, int frame_size, void *user_data), void *recv_cb_user_data);
+int64_t raplayer_spawn(raplayer_t *raplayer, bool mode, char *address, int port);
+
+int64_t raplayer_register_media_provider(raplayer_t *raplayer, void *(*send_callback)(void *user_data),
+                                         void *send_cb_user_data);
+
+
+int64_t raplayer_register_media_consumer(raplayer_t *raplayer,
+                                         void (*recv_callback)(void *frame, int frame_size, void *user_data),
+                                         void *recv_cb_user_data);
 
 #endif //RAPLAYER_RAPLAYER_H

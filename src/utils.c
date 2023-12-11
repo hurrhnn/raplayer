@@ -1,31 +1,33 @@
-#include <raplayer/utils.h>
+#include "raplayer/utils.h"
 
 const char *raplayer_strerror(int err) {
     switch (err) {
         case RA_SOCKET_CREATION_FAILED:
-            return "Socket Creation Failed";
+            return "Socket creation failed";
         case RA_CONNECTION_RESOLVE_FAILED:
-            return "Connection Cannot resolved to address";
+            return "Connection cannot resolved to address";
         case RA_ADDRESS_CONVERSION_FAILED:
-            return "Convert internet host address Failed";
+            return "Convert internet host address failed";
         case RA_SOCKET_INIT_SEQ1_FAILED:
-            return "Socket initiating sequence 1 Failed";
+            return "Socket initiating sequence 1 failed";
         case RA_SOCKET_INIT_SEQ2_FAILED:
-            return "Socket initiating sequence 2 Failed";
+            return "Socket initiating sequence 2 failed";
         case RA_SOCKET_INIT_SEQ3_FAILED:
-            return "Socket initiating sequence 3 Failed";
+            return "Socket initiating sequence 3 failed";
         case RA_CREATE_OPUS_DECODER_FAILED:
             return "Failed to create opus decoder";
         case RA_OPUS_DECODE_FAILED:
             return "Opus decoder failed to operate";
         case RA_SOCKET_BIND_FAILED:
-            return "Socket bind Failed";
+            return "Socket bind failed";
         case RA_CREATE_OPUS_ENCODER_FAILED:
             return "Failed to create opus encoder";
         case RA_OPUS_ENCODER_CTL_FAILED:
             return "Failed to setting opus encode bitrate";
         case RA_OPUS_ENCODE_FAILED:
             return "Opus encoder failed to operate";
+        case RA_MEDIA_INVALID_ARGUMENT:
+            return "Media arguments are invalid";
         default:
             return "Unknown error occurred";
     }

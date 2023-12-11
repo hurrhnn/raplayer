@@ -22,12 +22,13 @@
 #include <pthread.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <raplayer/config.h>
-#include <raplayer/chacha20.h>
-#include <raplayer/utils.h>
 
 #ifndef RAPLAYER_TASK_QUEUE_H
 #define RAPLAYER_TASK_QUEUE_H
+
+#include "config.h"
+#include "chacha20.h"
+#include "utils.h"
 
 typedef struct {
     void *data;
@@ -38,7 +39,7 @@ typedef struct {
     int front;
     int rear;
 
-    ra_task_t *tasks[MAX_QUEUE_SIZE];
+    ra_task_t *tasks[RA_MAX_QUEUE_SIZE];
     pthread_mutex_t mutex;
     pthread_cond_t empty, fill;
 

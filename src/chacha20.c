@@ -18,7 +18,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <raplayer/chacha20.h>
+#include "raplayer/chacha20.h"
 
 unsigned char *generate_random_bytestream(size_t num_bytes) {
     struct timeval timeval;
@@ -78,7 +78,7 @@ void chacha20_block_next(struct chacha20_context *ctx) {
     for (int i = 0; i < 16; i++) ctx->key_stream[i] = ctx->state[i];
 
 #define CHACHA20_QUARTERROUND(x, a, b, c, d) \
-    x[a] += (x)[b]; (x)[d] = rotl_32((x)[d] ^ (x)[a], 16); \
+    (x)[a] += (x)[b]; (x)[d] = rotl_32((x)[d] ^ (x)[a], 16); \
     (x)[c] += (x)[d]; (x)[b] = rotl_32((x)[b] ^ (x)[c], 12); \
     (x)[a] += (x)[b]; (x)[d] = rotl_32((x)[d] ^ (x)[a], 8); \
     (x)[c] += (x)[d]; (x)[b] = rotl_32((x)[b] ^ (x)[c], 7);

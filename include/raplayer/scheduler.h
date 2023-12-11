@@ -18,9 +18,6 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RAPLAYER_SCHEDULER_H
-#define RAPLAYER_SCHEDULER_H
-
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -29,9 +26,13 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <sys/poll.h>
-#include <raplayer/queue.h>
-#include <raplayer/chacha20.h>
-#include <raplayer/node.h>
+
+#ifndef RAPLAYER_SCHEDULER_H
+#define RAPLAYER_SCHEDULER_H
+
+#include "utils.h"
+#include "queue.h"
+#include "node.h"
 
 typedef struct {
     struct pollfd **fds;
@@ -46,8 +47,8 @@ typedef struct {
     ra_node_t ***node;
     uint64_t *cnt_node;
 
-    ra_spawn_t ***spawn;
-    uint64_t *cnt_spawn;
+    ra_media_t ***media;
+    uint64_t *cnt_media;
 } ra_packet_scheduler_args_t;
 
 _Noreturn void *schedule_packet(void *);
