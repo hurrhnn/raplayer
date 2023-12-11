@@ -24,6 +24,13 @@
 #include <math.h>
 #include <sys/errno.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <getopt.h>
+
+#define OPTIONAL_ARGUMENT_IS_PRESENT \
+    ((optarg == NULL && optind < argc && argv[optind][0] != '-') \
+     ? (bool) (optarg = argv[optind++]) \
+     : (optarg != NULL))
 
 struct pcm_header {
     char chunk_id[4];
@@ -58,42 +65,46 @@ struct pcm {
 
 void print_usage(char **argv) {
     puts("");
-    printf("Usage: %s <Running Mode>\n\n", argv[0]);
-    puts("--client: Running on client mode.");
-    puts("--server: Running on server mode.");
+    printf("Usage: ./%s -l|-c -a [address] -p [Port] -f <FILE>\n\n",
+           (strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0]));
+    puts("-l|-c: Run application with <host/peer> mode.");
+    puts("-a: The IP or address to which you want to bind or connect.");
+    puts("-p: The port number which you want to open or connect.");
+    puts("-f: The name of the pcm_s16le wav file to play. (\"-\" to receive stream from STDIN)");
     puts("");
+    exit(EXIT_SUCCESS);
 }
 
 void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
-    fread(pPcm->pcmHeader.chunk_id, DWORD, 1, fin);
-    fread(&pPcm->pcmHeader.chunk_size, DWORD, 1, fin);
-    fread(pPcm->pcmHeader.format, DWORD, 1, fin);
+    fread(pPcm->pcmHeader.chunk_id, RA_DWORD, 1, fin);
+    fread(&pPcm->pcmHeader.chunk_size, RA_DWORD, 1, fin);
+    fread(pPcm->pcmHeader.format, RA_DWORD, 1, fin);
 
-    fread(pPcm->pcmFmtChunk.chunk_id, DWORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.chunk_size, DWORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.audio_format, WORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.channels, WORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.sample_rate, DWORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.byte_rate, DWORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.block_align, WORD, 1, fin);
-    fread(&pPcm->pcmFmtChunk.bits_per_sample, WORD, 1, fin);
+    fread(pPcm->pcmFmtChunk.chunk_id, RA_DWORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.chunk_size, RA_DWORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.audio_format, RA_WORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.channels, RA_WORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.sample_rate, RA_DWORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.byte_rate, RA_DWORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.block_align, RA_WORD, 1, fin);
+    fread(&pPcm->pcmFmtChunk.bits_per_sample, RA_WORD, 1, fin);
 
-    char tmpBytes[BYTE] = {};
+    char tmpBytes[RA_BYTE] = {};
     while (1) {
         if (feof(fin)) { // End Of File.
             printf("Error: The data chunk of the file not found.\n");
             exit(EXIT_FAILURE);
         }
 
-        if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'd')
-            if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a')
-                if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 't')
-                    if (fread(tmpBytes, BYTE, 1, fin) && tmpBytes[0] == 'a')  // A PCM *d a t a* signature.
+        if (fread(tmpBytes, RA_BYTE, 1, fin) && tmpBytes[0] == 'd')
+            if (fread(tmpBytes, RA_BYTE, 1, fin) && tmpBytes[0] == 'a')
+                if (fread(tmpBytes, RA_BYTE, 1, fin) && tmpBytes[0] == 't')
+                    if (fread(tmpBytes, RA_BYTE, 1, fin) && tmpBytes[0] == 'a')  // A PCM *d a t a* signature.
                         break;
     }
 
-    memcpy(pPcm->pcmDataChunk.chunk_id, "data", DWORD);
-    fread(&pPcm->pcmDataChunk.chunk_size, DWORD, 1, fin);
+    memcpy(pPcm->pcmDataChunk.chunk_id, "data", RA_DWORD);
+    fread(&pPcm->pcmDataChunk.chunk_size, RA_DWORD, 1, fin);
 }
 
 //struct termios orig_termios;
@@ -156,7 +167,7 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
 //    int symbol_cnt = 0;
 //    char symbols[] = {'-', '\\', '|', '/'};
 //    while (!raplayer_get_client_status(callback_user_data_args[0], 0, RA_NODE_CONNECTION_EXHAUSTED)) {
-//        *((char *) symbol) = symbols[symbol_cnt++ % DWORD];
+//        *((char *) symbol) = symbols[symbol_cnt++ % RA_DWORD];
 //
 //        struct timespec timespec;
 //        timespec.tv_sec = 0;
@@ -178,11 +189,11 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
 //
 //    set_conio_terminal_mode();
 //
-//    void **p_symbol_args = calloc(sizeof(void *), WORD);
+//    void **p_symbol_args = calloc(sizeof(void *), RA_WORD);
 //    p_symbol_args[0] = callback_user_data_args[0];
 //    p_symbol_args[1] = &symbol;
 //
-//    void **p_pthread_signal_args = calloc(sizeof(void *), DWORD);
+//    void **p_pthread_signal_args = calloc(sizeof(void *), RA_DWORD);
 //    p_pthread_signal_args[0] = callback_user_data_args[0];
 //    p_pthread_signal_args[1] = callback_user_data_args[4];
 //    p_pthread_signal_args[2] = callback_user_data_args[5];
@@ -270,25 +281,26 @@ void init_pcm_structure(FILE *fin, struct pcm *pPcm) {
 //    return NULL;
 //}
 
-void client_frame_callback(void *frame, int frame_size, void *user_args) {
+void receive_frame_callback(void *frame, int frame_size, void *user_args) {
     void **callback_user_data_args = user_args;
     double *volume = (double *) callback_user_data_args[1];
     uint64_t *sum_frame_cnt = (uint64_t *) callback_user_data_args[2];
     uint64_t *sum_frame_size = (uint64_t *) callback_user_data_args[3];
 
     int16_t *volume_frame = frame;
-    for(int i = 0; i < frame_size * OPUS_AUDIO_CH; i++)
+    for (int i = 0; i < frame_size * RA_OPUS_AUDIO_CH; i++)
         volume_frame[i] = (int16_t) round(volume_frame[i] - (volume_frame[i] * *volume));
 
     Pa_WriteStream(callback_user_data_args[6], frame, frame_size);
 
     (*sum_frame_cnt)++;
-    (*sum_frame_size) += frame_size * WORD * OPUS_AUDIO_CH;
+    (*sum_frame_size) += frame_size * RA_WORD * RA_OPUS_AUDIO_CH;
 }
 
-void *server_frame_callback(void *user_args) {
+void *provide_frame_callback(void *user_args) {
     void **callback_user_data_args = user_args;
-    fread((void *) callback_user_data_args[2], WORD * OPUS_AUDIO_CH, FRAME_SIZE, (void *) callback_user_data_args[1]);
+    fread((void *) callback_user_data_args[2], RA_WORD * RA_OPUS_AUDIO_CH, RA_FRAME_SIZE,
+          (void *) callback_user_data_args[1]);
     return callback_user_data_args[2];
 }
 
@@ -296,194 +308,194 @@ int main(int argc, char **argv) {
     raplayer_t raplayer;
     raplayer_init_context(&raplayer);
 
-    if (argc < 2 ? true : !strcmp(argv[1], "--client") ? false : !strcmp(argv[1], "--server") ? false : true)
+    int port = 3845;
+    char *address = NULL, *file_name = NULL, *program_name = argv[0];
+    bool pipe_mode = false;
+    bool operate_mode = false;
+
+    int opt;
+    struct option options[] = {
+            {"help", no_argument,       0, 'h'},
+            {"host", no_argument,       0, 'l'},
+            {"peer", no_argument,       0, 'c'},
+            {"addr", required_argument, 0, 'a'},
+            {"port", required_argument, 0, 'p'},
+            {"file", required_argument, 0, 'f'},
+    };
+
+    do {
+        int cur_ind = optind;
+        opt = getopt_long(argc, argv, "hlca:p:f:", options, NULL);
+        switch (opt) {
+            case 'h':
+                print_usage(argv);
+                break;
+            case 'l':
+                operate_mode = false;
+                break;
+            case 'c':
+                operate_mode = true;
+                break;
+            case 'a':
+                address = strdup(optarg);
+                break;
+            case 'p':
+                port = (int) strtol(optarg, NULL, 10);
+                break;
+            case 'f':
+                file_name = strdup(optarg);
+                break;
+            case '?':
+                printf("%s: unrecognized option '%s'", program_name, argv[cur_ind]);
+                print_usage(argv);
+                break;
+            case -1:
+            default:
+                break;
+        }
+    } while (opt != -1);
+
+    if(file_name == NULL)
+    {
+        printf("Error: File name or pipe indicator must be specified.\n");
         print_usage(argv);
-    else if (!strcmp(argv[1], "--client")) {
-        int port;
-        if (argc < 3 || (strcmp(argv[2], "help") == 0)) {
-            puts("");
-            printf("Usage: %s --client <Server Address> [Port]\n\n", argv[0]);
-            puts("<Server Address>: The IP or address of the server to which you want to connect.");
-            puts("[Port]: The port on the server to which you want to connect.");
-            puts("");
-            return 0;
-        }
-
-        if (argc < 4)
-            port = 3845;
-        else
-            port = (int) strtol(argv[3], NULL, 10);
-
-        fclose(stderr); // Close stderr to avoid show alsa-lib error spamming.
-        int err = Pa_Initialize();
-
-        if (err != paNoError) {
-            printf("PortAudio error: %s\n", Pa_GetErrorText(err));
-            return EXIT_FAILURE;
-        }
-
-        PaStreamParameters outputParameters;
-        PaStream *stream;
-
-        outputParameters.device = Pa_GetDefaultOutputDevice(); /* Get default output device */
-        if (outputParameters.device == paNoDevice) {
-            printf("Error: No default output device.\n");
-            return EXIT_FAILURE;
-        }
-
-        printf("Connecting to %s:%d..\r\n", argv[2], port);
-
-        double volume = 0.5;
-        uint64_t sum_frame_cnt = 0;
-        uint64_t sum_frame_size = 0;
-        pthread_cond_t print_volume_cond = PTHREAD_COND_INITIALIZER;
-        pthread_mutex_t print_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-        void **p_callback_user_data_args = calloc(sizeof(void *), DWORD * 2);
-        p_callback_user_data_args[0] = &raplayer;
-        p_callback_user_data_args[1] = &volume;
-        p_callback_user_data_args[2] = &sum_frame_cnt;
-        p_callback_user_data_args[3] = &sum_frame_size;
-        p_callback_user_data_args[4] = &print_volume_cond;
-        p_callback_user_data_args[5] = &print_volume_mutex;
-
-        outputParameters.channelCount = OPUS_AUDIO_CH;
-        outputParameters.sampleFormat = paInt16; /* 16 bit integer output */
-        outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
-        outputParameters.hostApiSpecificStreamInfo = NULL;
-
-        Pa_OpenStream(
-                &stream,
-                NULL, /* no input */
-                &outputParameters,
-                (double) OPUS_AUDIO_SR,
-                paFramesPerBufferUnspecified,
-                paClipOff, /* we won't output out of range samples so don't bother clipping them */
-                NULL, /* no callback, use blocking I/O */
-                NULL);
-
-        p_callback_user_data_args[6] = stream;
-        Pa_StartStream(stream);
-
-        raplayer_spawn(&raplayer, RA_MODE_PEER, argv[2], port, NULL, NULL,
-                       client_frame_callback, p_callback_user_data_args);
-
-        pthread_t info_printer;
-        pthread_t volume_controller;
-
-        while (true);
-
-//        pthread_create(&info_printer, NULL, print_info, p_callback_user_data_args); // Activate info printer.
-//        pthread_create(&volume_controller, NULL, control_volume,
-//                       p_callback_user_data_args); // Activate volume controller.
-//
-//        int32_t status = raplayer_wait_client(&raplayer, id);
-//        if(status != 0)
-//            printf("Client finished with exit code %d, %s.\n", status, raplayer_strerror(status));
-
-        Pa_StopStream(stream);
-        Pa_CloseStream(stream);
-        Pa_Terminate();
-    } else if (!strcmp(argv[1], "--server")) {
-        bool pipe_mode = false;
-        bool stream_mode = false;
-
-        // TODO: Deprecate the --stream arg, raplayer libraries will detect the stream mode automatically.
-        if (argc < 3 || (strcmp(argv[2], "help") == 0)) {
-            puts("");
-            printf("Usage: %s --server [--stream] <FILE> [Port]\n\n", argv[0]);
-            puts("<FILE>: The name of the pcm_s16le wav file to play. (\"-\" to receive from STDIN)");
-            puts("[--stream]: Allow consume streams from STDIN until client connected. (DEPRECATED)");
-            puts("[Port]: The port on the server to which you want to open.");
-            puts("");
-            return 0;
-        }
-        int port;
-        if (argc < 5) {
-            if (!strcmp(argv[2], "--stream"))
-                stream_mode = true;
-            port = 3845;
-        } else if (strtol(argv[3], NULL, 10) != EINVAL && strtol(argv[3], NULL, 10)) {
-            if (!strcmp(argv[2], "--stream"))
-                stream_mode = true;
-            port = (int) strtol(argv[3], NULL, 10);
-        } else {
-            if (!strcmp(argv[2], "--stream"))
-                stream_mode = true;
-            port = (int) strtol(argv[4], NULL, 10);
-        }
-
-        struct pcm *pcm_struct = calloc(sizeof(struct pcm), BYTE);
-
-        char *fin_name = stream_mode ? argv[3] : argv[2];
-        if (fin_name[0] == '-' && fin_name[1] != '-') {
-            pcm_struct->pcmFmtChunk.channels = 2;
-            pcm_struct->pcmFmtChunk.sample_rate = 48000;
-            pcm_struct->pcmFmtChunk.bits_per_sample = 16;
-            pcm_struct->pcmDataChunk.chunk_size = 0;
-            fin_name = "STREAM";
-            pipe_mode = true;
-        }
-
-        if (!pipe_mode && stream_mode) {
-            free(pcm_struct);
-            fprintf(stdout, "Invalid argument: --stream argument cannot run without <file> argument \"-\".\n");
-            return EXIT_FAILURE;
-        }
-
-        FILE *fin;
-        fin = (pipe_mode ? stdin : fopen(fin_name, "rb"));
-
-        if (fin == NULL) {
-            free(pcm_struct);
-            fprintf(stdout, "Error: Failed to open input file: %s\n", strerror(errno));
-            return EXIT_FAILURE;
-        }
-
-        fpos_t before_data_pos;
-        if (!pipe_mode)
-            init_pcm_structure(fin, pcm_struct);
-
-        if (!pipe_mode && (pcm_struct->pcmFmtChunk.channels != 2 ||
-                           pcm_struct->pcmFmtChunk.sample_rate != 48000 ||
-                           pcm_struct->pcmFmtChunk.bits_per_sample != 16)) {
-            free(pcm_struct);
-            fprintf(stdout, "Error: Failed to open input file - must be a pcm_s16le 48000hz 2 channels wav file.\n");
-            return EXIT_FAILURE;
-        }
-
-        /* Set fd to non-blocking mode. */
-        int flags = fcntl(fileno(fin), F_GETFL, 0);
-        fcntl(fileno(fin), F_SETFL, flags | O_NONBLOCK);
-
-        printf("\nFile %s info: \n", fin_name);
-        printf("Channels: %hd\n", pcm_struct->pcmFmtChunk.channels);
-        printf("Sample rate: %u\n", pcm_struct->pcmFmtChunk.sample_rate);
-        printf("Bit per sample: %hd\n", pcm_struct->pcmFmtChunk.bits_per_sample);
-        if (pipe_mode)
-            printf("PCM data length: STREAM\n\n");
-        else
-            printf("PCM data length: %u\n\n", pcm_struct->pcmDataChunk.chunk_size);
-
-        puts("Waiting for Client... ");
-        fflush(stdout);
-
-        void **p_callback_user_data_args = calloc(sizeof(void *), DWORD);
-        p_callback_user_data_args[0] = &raplayer;
-        p_callback_user_data_args[1] = fin;
-        p_callback_user_data_args[2] = malloc(FRAME_SIZE * OPUS_AUDIO_CH * WORD);
-
-        raplayer_spawn(&raplayer, RA_MODE_HOST, NULL, port, server_frame_callback,
-                       p_callback_user_data_args, NULL, NULL);
-
-//        uint64_t id = raplayer_spawn_server(&raplayer, port, server_frame_callback, p_callback_user_data_args);
-//        int32_t status = raplayer_wait_server(&raplayer, id);
-//        if(status != 0)
-//            printf("Server stopped with exit code %d, %s.\n", status, raplayer_strerror(status));
-
-        while (true);
-
-        free(p_callback_user_data_args[2]);
     }
+
+    if(operate_mode && address == NULL) {
+        printf("Error: remote address must be specified when peer mode.\n");
+        print_usage(argv);
+    }
+
+    fclose(stderr); // Close stderr to avoid show alsa-lib error spamming.
+    int err = Pa_Initialize();
+
+    if (err != paNoError) {
+        printf("PortAudio error: %s\n", Pa_GetErrorText(err));
+        return EXIT_FAILURE;
+    }
+
+    PaStreamParameters outputParameters;
+    PaStream *stream;
+
+    outputParameters.device = Pa_GetDefaultOutputDevice(); /* Get default output device */
+    if (outputParameters.device == paNoDevice) {
+        printf("Error: No default output device.\n");
+        return EXIT_FAILURE;
+    }
+
+    struct pcm *pcm_struct = calloc(sizeof(struct pcm), RA_BYTE);
+
+    if (strcmp(file_name, "-") == 0) {
+        pcm_struct->pcmFmtChunk.channels = 2;
+        pcm_struct->pcmFmtChunk.sample_rate = 48000;
+        pcm_struct->pcmFmtChunk.bits_per_sample = 16;
+        pcm_struct->pcmDataChunk.chunk_size = 0;
+        file_name = "STREAM";
+        pipe_mode = true;
+    }
+
+    FILE *fin;
+    fin = (pipe_mode ? stdin : fopen(file_name, "rb"));
+
+    if (fin == NULL) {
+        free(pcm_struct);
+        fprintf(stdout, "Error: Failed to open input file: %s\n", strerror(errno));
+        return EXIT_FAILURE;
+    }
+
+    if (!pipe_mode)
+        init_pcm_structure(fin, pcm_struct);
+
+    if (!pipe_mode && (pcm_struct->pcmFmtChunk.channels != 2 ||
+                       pcm_struct->pcmFmtChunk.sample_rate != 48000 ||
+                       pcm_struct->pcmFmtChunk.bits_per_sample != 16)) {
+        free(pcm_struct);
+        fprintf(stdout, "Error: Failed to open input file - must be a pcm_s16le 48000hz 2 channels wav file.\n");
+        return EXIT_FAILURE;
+    }
+
+    /* Set fd to non-blocking mode. */
+    int flags = fcntl(fileno(fin), F_GETFL, 0);
+    fcntl(fileno(fin), F_SETFL, flags | O_NONBLOCK);
+
+    printf("\nFile %s info: \n", file_name);
+    printf("Channels: %hd\n", pcm_struct->pcmFmtChunk.channels);
+    printf("Sample rate: %u\n", pcm_struct->pcmFmtChunk.sample_rate);
+    printf("Bit per sample: %hd\n", pcm_struct->pcmFmtChunk.bits_per_sample);
+    if (pipe_mode)
+        printf("PCM data length: STREAM\n\n");
+    else
+        printf("PCM data length: %u\n\n", pcm_struct->pcmDataChunk.chunk_size);
+    fflush(stdout);
+
+    if (operate_mode)
+        printf("Connecting to %s:%d..\r\n", address, port);
+
+    double volume = 0.5;
+    uint64_t sum_frame_cnt = 0;
+    uint64_t sum_frame_size = 0;
+    pthread_cond_t print_volume_cond = PTHREAD_COND_INITIALIZER;
+    pthread_mutex_t print_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    void **p_send_cb_user_data_args = calloc(sizeof(void *), RA_DWORD);
+    p_send_cb_user_data_args[0] = &raplayer;
+    p_send_cb_user_data_args[1] = fin;
+    p_send_cb_user_data_args[2] = malloc(RA_FRAME_SIZE * RA_OPUS_AUDIO_CH * RA_WORD);
+
+    void **p_recv_cb_user_data_args = calloc(sizeof(void *), RA_DWORD * 2);
+    p_recv_cb_user_data_args[0] = &raplayer;
+    p_recv_cb_user_data_args[1] = &volume;
+    p_recv_cb_user_data_args[2] = &sum_frame_cnt;
+    p_recv_cb_user_data_args[3] = &sum_frame_size;
+    p_recv_cb_user_data_args[4] = &print_volume_cond;
+    p_recv_cb_user_data_args[5] = &print_volume_mutex;
+
+    outputParameters.channelCount = RA_OPUS_AUDIO_CH;
+    outputParameters.sampleFormat = paInt16; /* 16 bit integer output */
+    outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
+    outputParameters.hostApiSpecificStreamInfo = NULL;
+
+    Pa_OpenStream(
+            &stream,
+            NULL, /* no input */
+            &outputParameters,
+            (double) RA_OPUS_AUDIO_SR,
+            paFramesPerBufferUnspecified,
+            paClipOff, /* we won't output out of range samples so don't bother clipping them */
+            NULL, /* no callback, use blocking I/O */
+            NULL);
+
+    p_recv_cb_user_data_args[6] = stream;
+    Pa_StartStream(stream);
+
+    raplayer_spawn(&raplayer, operate_mode, address, port);
+    int64_t provider_media_id =
+            raplayer_register_media_provider(&raplayer, provide_frame_callback, p_send_cb_user_data_args);
+
+    int64_t consumer_media_id =
+            raplayer_register_media_consumer(&raplayer, receive_frame_callback, p_recv_cb_user_data_args);
+
+    while (true);
+
+//    uint64_t id = raplayer_spawn_server(&raplayer, port, provide_frame_callback, p_recv_cb_user_data_args);
+//    int32_t status = raplayer_wait_server(&raplayer, id);
+//    if (status != 0)
+//        printf("Server stopped with exit code %d, %s.\n", status, raplayer_strerror(status));
+//
+//    pthread_t info_printer;
+//    pthread_t volume_controller;
+//
+//    pthread_create(&info_printer, NULL, print_info, p_recv_cb_user_data_args); // Activate info printer.
+//    pthread_create(&volume_controller, NULL, control_volume,
+//                   p_recv_cb_user_data_args); // Activate volume controller.
+//
+//    int32_t status = raplayer_wait_client(&raplayer, id);
+//    if (status != 0)
+//        printf("Client finished with exit code %d, %s.\n", status, raplayer_strerror(status));
+
+    free(p_recv_cb_user_data_args[2]);
+    Pa_StopStream(stream);
+    Pa_CloseStream(stream);
+    Pa_Terminate();
     return EXIT_SUCCESS;
 }
