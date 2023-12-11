@@ -1,0 +1,4 @@
+#ifndef RAPLAYER_MEDIA_H
+#define RAPLAYER_MEDIA_H
+
+#endif //RAPLAYER_MEDIA_H
