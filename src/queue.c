@@ -19,14 +19,24 @@
 */
 
 #include "raplayer/queue.h"
+#include "raplayer/utils.h"
 
-void init_queue(ra_queue_t *q) {
+void init_queue(ra_queue_t *q, uint64_t size) {
     q->rear = 0;
     q->front = 0;
+    q->size = (size == 0 ? RA_MAX_QUEUE_SIZE : size + 1);
 
+    q->tasks = malloc(sizeof(ra_task_t *) * q->size);
     pthread_mutex_init(&q->mutex, NULL);
     pthread_cond_init(&q->empty, NULL);
     pthread_cond_init(&q->fill, NULL);
+}
+
+void destroy_queue(ra_queue_t *q) {
+    free(q->tasks);
+    pthread_mutex_destroy(&q->mutex);
+    pthread_cond_destroy(&q->empty);
+    pthread_cond_destroy(&q->fill);
 }
 
 int is_empty(const ra_queue_t *q) {
@@ -34,7 +44,7 @@ int is_empty(const ra_queue_t *q) {
 }
 
 int is_full(const ra_queue_t *q) {
-    return ((q->rear + 1) % RA_MAX_QUEUE_SIZE == q->front);
+    return ((q->rear + 1) % q->size == q->front);
 }
 
 ra_task_t* create_task(uint32_t len) {
@@ -44,10 +54,27 @@ ra_task_t* create_task(uint32_t len) {
     return task;
 }
 
+bool append_task_with_removal(ra_queue_t *q, ra_task_t *task) {
+    pthread_mutex_lock(&q->mutex);
+
+    while (is_full(q)) {
+        q->front = (q->front + 1) % q->size;
+        ra_task_t *removed_task = q->tasks[q->front];
+        remove_task(removed_task);
+    }
+
+    q->rear = (q->rear + 1) % q->size;
+    q->tasks[q->rear] = task;
+
+    pthread_cond_signal(&q->fill);
+    pthread_mutex_unlock(&q->mutex);
+    return true;
+}
+
 bool append_task(ra_queue_t *q, ra_task_t *task) {
     pthread_mutex_lock(&q->mutex);
     while (is_full(q)) { pthread_cond_wait(&q->empty, &q->mutex); }
-    q->rear = (q->rear + 1) % RA_MAX_QUEUE_SIZE;
+    q->rear = (q->rear + 1) % q->size;
     q->tasks[q->rear] = task;
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);
@@ -57,9 +84,9 @@ bool append_task(ra_queue_t *q, ra_task_t *task) {
 ra_task_t *retrieve_task(ra_queue_t *q) {
     pthread_mutex_lock(&q->mutex);
     while (is_empty(q)) { pthread_cond_wait(&q->fill, &q->mutex); }
-    q->front = (q->front + 1) % RA_MAX_QUEUE_SIZE;
-    ra_task_t *current_task = q->tasks[q->front];
-    pthread_cond_signal(&q->fill);
+    q->front = (q->front + 1) % q->size;
+        ra_task_t *current_task = q->tasks[q->front];
+    pthread_cond_signal(&q->empty);
     pthread_mutex_unlock(&q->mutex);
     return current_task;
 }

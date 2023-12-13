@@ -26,32 +26,31 @@
 #ifndef RAPLAYER_TASK_QUEUE_H
 #define RAPLAYER_TASK_QUEUE_H
 
-#include "config.h"
-#include "chacha20.h"
-#include "utils.h"
-
 typedef struct {
     void *data;
     uint32_t data_len;
 } ra_task_t;
 
 typedef struct {
-    int front;
-    int rear;
+    uint64_t front;
+    uint64_t rear;
 
-    ra_task_t *tasks[RA_MAX_QUEUE_SIZE];
+    uint64_t size;
+    ra_task_t **tasks;
     pthread_mutex_t mutex;
     pthread_cond_t empty, fill;
 
 } ra_queue_t;
 
-void init_queue(ra_queue_t *q);
+void init_queue(ra_queue_t *q, uint64_t size);
 
 int is_full(const ra_queue_t *q);
 
 int is_empty(const ra_queue_t *q);
 
 bool append_task(ra_queue_t *q, ra_task_t *task);
+
+bool append_task_with_removal(ra_queue_t *q, ra_task_t *task);
 
 ra_task_t *retrieve_task(ra_queue_t *q);
 
