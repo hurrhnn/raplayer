@@ -1,6 +1,6 @@
 #include "raplayer/utils.h"
 
-const char *raplayer_strerror(int err) {
+const char *raplayer_strerror(int64_t err) {
     switch (err) {
         case RA_SOCKET_CREATION_FAILED:
             return "Socket creation failed";

@@ -30,8 +30,8 @@
 #ifndef RAPLAYER_SCHEDULER_H
 #define RAPLAYER_SCHEDULER_H
 
-#include "utils.h"
 #include "queue.h"
+#include "media.h"
 #include "node.h"
 
 typedef struct {

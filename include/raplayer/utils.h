@@ -167,13 +167,6 @@ typedef enum {
     RA_MEDIA_INVALID_ARGUMENT,
 } raplayer_errno_t;
 
-typedef enum {
-    RA_NODE_INITIATED = (1 << 0),
-    RA_NODE_CONNECTED = (1 << 1),
-    RA_NODE_CONNECTION_EXHAUSTED = (1 << 2),
-    RA_NODE_HEARTBEAT_RECEIVED = (1 << 3),
-} ra_node_status_t;
-
 typedef struct {
     uint64_t fd;
     struct sockaddr_in addr;
@@ -184,7 +177,7 @@ typedef struct {
     struct sockaddr_in addr;
 } ra_sock_remote_t;
 
-const char *raplayer_strerror(int err);
+const char *raplayer_strerror(int64_t err);
 
 u_int16_t ra_swap_endian_uint16(u_int16_t number);
 

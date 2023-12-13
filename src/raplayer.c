@@ -83,7 +83,7 @@ int64_t raplayer_spawn(raplayer_t *raplayer, bool mode, char *address, int port)
     raplayer->fds[raplayer->cnt_fds].fd = sock_fd;
     raplayer->fds[raplayer->cnt_fds].events = POLLIN;
 
-    raplayer->cnt_local_sock++;
+    uint64_t local_sock_idx = raplayer->cnt_local_sock++;
     raplayer->cnt_fds++;
 
     if(mode == RA_MODE_PEER) {
@@ -91,9 +91,9 @@ int64_t raplayer_spawn(raplayer_t *raplayer, bool mode, char *address, int port)
         memcpy(heartbeat_msg, RA_CTL_HEADER, RA_DWORD);
         memcpy(heartbeat_msg + RA_DWORD, "\x00", RA_BYTE);
         sendto(sock_fd, heartbeat_msg, 0x05, 0,
-               (const struct sockaddr *) &raplayer->local_sock[raplayer->cnt_local_sock - 1]->addr,
+               (const struct sockaddr *) &raplayer->local_sock[local_sock_idx]->addr,
                        sizeof(struct sockaddr_in));
         free(heartbeat_msg);
     }
-    return 0;
+    return (int64_t) local_sock_idx;
 }

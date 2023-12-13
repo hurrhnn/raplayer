@@ -1,5 +1,5 @@
 #include <string.h>
-#include "raplayer/utils.h"
+#include <stdlib.h>
 #include "raplayer/rtp.h"
 
 ra_rtp_t ra_get_rtp_context(void* buffer) {

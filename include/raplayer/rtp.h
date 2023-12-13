@@ -3,6 +3,8 @@
 #ifndef RAPLAYER_RTP_H
 #define RAPLAYER_RTP_H
 
+#include "utils.h"
+
 typedef union {
     struct __attribute__((aligned(1), packed)) {
         u_int8_t csrc_count: 4;
