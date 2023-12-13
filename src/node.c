@@ -1,5 +1,3 @@
-#include <raplayer/node.h>
-
 /*
  raplayer is a cross-platform remote audio player, written from the scratch.
  This file is part of raplayer.
@@ -20,11 +18,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "raplayer/chacha20.h"
-#include "raplayer/queue.h"
-#include "raplayer/scheduler.h"
-#include "raplayer/utils.h"
-#include "raplayer/rtp.h"
+#include "raplayer/node.h"
 
 void *ra_check_heartbeat(void *p_heartbeat_checker_args) {
     ra_node_t *node = p_heartbeat_checker_args;
@@ -38,7 +32,7 @@ void *ra_check_heartbeat(void *p_heartbeat_checker_args) {
             nanosleep(&timespec, NULL);
 
             if (!(node->status & RA_NODE_HEARTBEAT_RECEIVED)) {
-                RA_WARN("%02llu: Connection closed from %s:%d\n",
+                RA_WARN("%02llu: Connection closed with %s:%d\n",
                         node->id + 1, inet_ntoa(node->remote_sock->addr.sin_addr),
                         ntohs(node->remote_sock->addr.sin_port));
                 RA_WARN("Receiving client heartbeat timed out.\n");
@@ -104,17 +98,16 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
     uint32_t *ssrc = (uint32_t *) generate_random_bytestream(sizeof(uint32_t));
     uint32_t timestamp = 0;
 
-    ra_media_t *node_spawn = NULL, **spawn = *opus_builder_args->media;
+    ra_media_t *node_sender = NULL, **media = *opus_builder_args->media;
     for(int i = 0; i < *opus_builder_args->cnt_media; i++) {
-        if(spawn[i]->type == RA_MEDIA_TYPE_SEND &&
-           ra_compare_sockaddr(&spawn[i]->src_sock->addr, &node->local_sock->addr))
+        if(media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE && media[i]->src == node->local_sock)
         {
-            node_spawn = spawn[i];
+            node_sender = media[i];
             break;
         }
     }
 
-    if(node_spawn == NULL) {
+    if(node_sender == NULL) {
         RA_DEBUG_MORE(YEL, "send not registered! sender will not active.\n");
         return NULL;
     }
@@ -133,7 +126,8 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
         }
 
         /* Read 16bit/sample audio frame. */
-        unsigned char *pcm_bytes = node_spawn->callback.send(node_spawn->cb_user_data);
+        ra_task_t *send_task = retrieve_task(node_sender->current.queue);
+        unsigned char *pcm_bytes = send_task->data;
 
         /* Convert from little-endian ordering. */
         for (int i = 0; i < RA_OPUS_AUDIO_CH * RA_FRAME_SIZE; i++)
@@ -266,8 +260,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
 
     ra_media_t *node_spawn = NULL;
     for(int i = 0; i < *cnt_spawn; i++) {
-        if(spawn[i]->type == RA_MEDIA_TYPE_RECV &&
-           ra_compare_sockaddr(&spawn[i]->src_sock->addr, &node->local_sock->addr))
+        if(spawn[i]->type == RA_MEDIA_TYPE_LOCAL_CONSUME && spawn[i]->src == node->local_sock)
         {
             node_spawn = spawn[i];
             break;
@@ -280,7 +273,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
     }
 
     while (true) {
-        ra_task_t *task = retrieve_task(node->frame_queue);
+        ra_task_t *task = retrieve_task(node->remote_media->current.queue); // TODO: FIX!
         ra_rtp_t rtp_header = ra_get_rtp_context(task->data);
         uint64_t rtp_header_len = ra_get_rtp_length(rtp_header);
 
@@ -292,6 +285,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
 //        chacha20_xor(&ctx, *calculated_c_bits, nbBytes);
 
         /* Decode the frame. */
+        memset(out, 0x0, RA_FRAME_SIZE * RA_WORD * node->channels);
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits,
                                      (opus_int32) (task->data_len - rtp_header_len), out, RA_FRAME_SIZE, 0);
         if (frame_size < 0) {
@@ -307,8 +301,11 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
         }
 
         // TODO: implement the client-side time synchronized callback
-        node_spawn->callback.recv(pcm_bytes, frame_size, node_spawn->cb_user_data);
-        remove_task(task);
+        frame_size *= (node->channels * RA_WORD);
+        ra_task_t *recv_task = create_task(frame_size);
+        memcpy(recv_task->data, pcm_bytes, frame_size);
+        append_task(node_spawn->current.queue, recv_task);
+//        node_spawn->callback.recv(pcm_bytes, frame_size, node_spawn->cb_user_data);
     }
 
     /* Wait for a joining thread. */

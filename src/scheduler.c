@@ -18,10 +18,9 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <pthread.h>
 #include "raplayer/scheduler.h"
-#include "raplayer/queue.h"
 #include "raplayer/dispatcher.h"
-#include "raplayer/node.h"
 
 _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -75,7 +74,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     if (local_sock_idx == -1)
                         continue;
 
-                    RA_INFO("%02llu: Connection from %s:%d\n", (*ra_packet_scheduler_args->cnt_node) + 1,
+                    RA_INFO("%02llu: New Connection with %s:%d\n", (*ra_packet_scheduler_args->cnt_node) + 1,
                             inet_ntoa(remote_addr.sin_addr),
                             ntohs(remote_addr.sin_port));
 //                            RA_DEBUG_MORE(GRN, "Node context write lock initiated.\n");
@@ -104,41 +103,51 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                                   sizeof(ra_node_t *) * ((*ra_packet_scheduler_args->cnt_node) + 1));
                     node = *ra_packet_scheduler_args->node;
 
-                    node[*ra_packet_scheduler_args->cnt_node] = malloc(sizeof(ra_node_t));
-                    node[*ra_packet_scheduler_args->cnt_node]->id = *ra_packet_scheduler_args->cnt_node;
-                    node[*ra_packet_scheduler_args->cnt_node]->status = RA_NODE_INITIATED;
-                    node[*ra_packet_scheduler_args->cnt_node]->local_sock = local_sock[local_sock_idx];
-                    node[*ra_packet_scheduler_args->cnt_node]->remote_sock = remote_sock[*ra_packet_scheduler_args->cnt_remote_sock];
-                    node[*ra_packet_scheduler_args->cnt_node]->sample_rate = 48000;
-                    node[*ra_packet_scheduler_args->cnt_node]->channels = 2;
-                    node[*ra_packet_scheduler_args->cnt_node]->bit_per_sample = 16;
-                    node[*ra_packet_scheduler_args->cnt_node]->recv_queue = malloc(sizeof(ra_queue_t));
-                    node[*ra_packet_scheduler_args->cnt_node]->send_queue = malloc(sizeof(ra_queue_t));
-                    node[*ra_packet_scheduler_args->cnt_node]->frame_queue = malloc(sizeof(ra_queue_t));
+                    uint64_t id = *ra_packet_scheduler_args->cnt_node;
+                    node[id] = malloc(sizeof(ra_node_t));
+                    node[id]->id = id;
+                    node[id]->status = RA_NODE_INITIATED;
+                    node[id]->local_sock = local_sock[local_sock_idx];
+                    node[id]->remote_sock = remote_sock[*ra_packet_scheduler_args->cnt_remote_sock];
+                    node[id]->sample_rate = 48000;
+                    node[id]->channels = 2;
+                    node[id]->bit_per_sample = 16;
+                    node[id]->recv_queue = malloc(sizeof(ra_queue_t));
+                    node[id]->send_queue = malloc(sizeof(ra_queue_t));
 
-                    init_queue(node[*ra_packet_scheduler_args->cnt_node]->recv_queue);
-                    init_queue(node[*ra_packet_scheduler_args->cnt_node]->send_queue);
-                    init_queue(node[*ra_packet_scheduler_args->cnt_node]->frame_queue);
-                    append_task(node[*ra_packet_scheduler_args->cnt_node]->recv_queue, task);
+                    uint64_t media_id = ra_media_register(ra_packet_scheduler_args->media,
+                                                          ra_packet_scheduler_args->cnt_media, RA_MEDIA_TYPE_REMOTE_PROVIDE, 5,
+                                                          NULL, NULL);
+                    ra_media_t **media = *ra_packet_scheduler_args->media;
+                    media[media_id]->src = local_sock[local_sock_idx];
+                    media[media_id]->status = RA_MEDIA_INITIATED;
+
+                    node[id]->remote_media = media[media_id];
+
+                    init_queue(node[id]->recv_queue, 0);
+                    init_queue(node[id]->send_queue, 0);
+                    append_task(node[id]->recv_queue, task);
 
 //                            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 //                            RA_DEBUG_MORE(GRN, "Node context write lock released.\n");
 
-                    node[*ra_packet_scheduler_args->cnt_node]->status = RA_NODE_INITIATED;
+                    node[id]->status = RA_NODE_INITIATED;
 
+                    /* activate node packet dispatcher */
                     pthread_t packet_dispatcher;
-                    pthread_create(&packet_dispatcher, NULL, dispatch_packet, node[*ra_packet_scheduler_args->cnt_node]);
+                    pthread_create(&packet_dispatcher, NULL, dispatch_packet, node[id]);
 
                     pthread_t frame_sender, frame_receiver;
                     ra_node_frame_args_t *node_frame_args = malloc(sizeof(ra_node_frame_args_t));
-                    node_frame_args->node = node[*ra_packet_scheduler_args->cnt_node];
+                    node_frame_args->node = node[id];
                     node_frame_args->media = ra_packet_scheduler_args->media;
                     node_frame_args->cnt_media = ra_packet_scheduler_args->cnt_media;
+                    node_frame_args->media_id = media_id;
 
                     /* activate node heartbeat checker & sender */
                     pthread_t heartbeat_checker, heartbeat_sender;
-                    pthread_create(&heartbeat_checker, NULL, ra_check_heartbeat, node[*ra_packet_scheduler_args->cnt_node]);
-                    pthread_create(&heartbeat_sender, NULL, ra_send_heartbeat, node[*ra_packet_scheduler_args->cnt_node]);
+                    pthread_create(&heartbeat_checker, NULL, ra_check_heartbeat, node[id]);
+                    pthread_create(&heartbeat_sender, NULL, ra_send_heartbeat, node[id]);
 
                     *ra_packet_scheduler_args->cnt_remote_sock =
                             (*ra_packet_scheduler_args->cnt_remote_sock) + 1;

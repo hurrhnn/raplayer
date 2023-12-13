@@ -1,6 +1,5 @@
 #include "raplayer/dispatcher.h"
 #include "raplayer/node.h"
-#include "raplayer/queue.h"
 
 void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
     ra_node_t *node = p_ra_packet_dispatcher_args;
@@ -34,8 +33,10 @@ void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
                     break;
             }
             remove_task(task);
-        } else
-            append_task(node->frame_queue, task);
+        } else {
+            append_task(node->remote_media->current.queue, task);
+        }
+
     }
     return NULL;
 }

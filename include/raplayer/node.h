@@ -1,36 +1,31 @@
-#ifndef RAPLAYER_NODE_H
-#define RAPLAYER_NODE_H
-
+#include <stdio.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <opus/opus.h>
+#include <arpa/inet.h>
 
-#define RA_MEDIA_TYPE_SEND 0
-#define RA_MEDIA_TYPE_RECV 1
+#ifndef RAPLAYER_NODE_H
+#define RAPLAYER_NODE_H
 
+#include "utils.h"
 #include "queue.h"
+#include "chacha20.h"
+#include "rtp.h"
+#include "media.h"
 
-typedef struct {
-    bool type;
-    union {
-        void *(*send)(void *user_data);
-        void (*recv)(void *frame, int frame_size, void *user_data);
-    } callback;
-
-    void *cb_user_data;
-
-    struct {
-        ra_task_t frame;
-        pthread_rwlock_t rwlock;
-        uint64_t sequence;
-    } current;
-
-    ra_sock_local_t *src_sock;
-} ra_media_t;
+typedef enum {
+    RA_NODE_INITIATED = (1 << 0),
+    RA_NODE_CONNECTED = (1 << 1),
+    RA_NODE_CONNECTION_EXHAUSTED = (1 << 2),
+    RA_NODE_HEARTBEAT_RECEIVED = (1 << 3),
+} ra_node_status_t;
 
 typedef struct {
     ra_node_status_t status;
     uint64_t id;
+
+    ra_sock_local_t *local_sock;
+    ra_sock_remote_t *remote_sock;
 
     struct {
         uint16_t channels;
@@ -38,20 +33,19 @@ typedef struct {
         uint16_t bit_per_sample;
     };
 
-    ra_sock_local_t *local_sock;
-    ra_sock_remote_t *remote_sock;
-
     struct chacha20_context crypto_context;
 
     ra_queue_t *recv_queue;
     ra_queue_t *send_queue;
-    ra_queue_t *frame_queue;
+
+    ra_media_t *remote_media;
 } ra_node_t;
 
 typedef struct {
     ra_node_t *node;
     ra_media_t ***media;
     uint64_t *cnt_media;
+    uint64_t media_id;
 } ra_node_frame_args_t;
 
 typedef struct {
