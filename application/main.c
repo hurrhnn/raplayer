@@ -288,13 +288,16 @@ void receive_frame_callback(void *frame, int frame_size, void *user_args) {
     uint64_t *sum_frame_size = (uint64_t *) callback_user_data_args[3];
 
     int16_t *volume_frame = frame;
-    for (int i = 0; i < frame_size * RA_OPUS_AUDIO_CH; i++)
+    for (int i = 0; i < (frame_size / RA_OPUS_AUDIO_CH); i++)
         volume_frame[i] = (int16_t) round(volume_frame[i] - (volume_frame[i] * *volume));
 
-    Pa_WriteStream(callback_user_data_args[6], frame, frame_size);
+    /* before, we provided audio information to portaudio context when its create,
+     * Pa_WriteStream() already knows the what interval frame times to play with given raw frames.
+     * so, the given frame size should not be multiplied with channel counts and bits per sample .*/
+    Pa_WriteStream(callback_user_data_args[6], frame, frame_size / RA_OPUS_AUDIO_CH / RA_WORD);
 
     (*sum_frame_cnt)++;
-    (*sum_frame_size) += frame_size * RA_WORD * RA_OPUS_AUDIO_CH;
+    (*sum_frame_size) += frame_size;
 }
 
 void *provide_frame_callback(void *user_args) {
@@ -468,14 +471,18 @@ int main(int argc, char **argv) {
     p_recv_cb_user_data_args[6] = stream;
     Pa_StartStream(stream);
 
-    raplayer_spawn(&raplayer, operate_mode, address, port);
+    int64_t spawn_id = raplayer_spawn(&raplayer, operate_mode, address, port);
+    if(spawn_id < 0) {
+        printf("raplayer cannot be spawned - exit code %lld, %s.\n", spawn_id, raplayer_strerror(spawn_id));
+        return EXIT_FAILURE;
+    }
     int64_t provider_media_id =
-            raplayer_register_media_provider(&raplayer, provide_frame_callback, p_send_cb_user_data_args);
+            raplayer_register_media_provider(&raplayer, spawn_id, provide_frame_callback, p_send_cb_user_data_args);
 
     int64_t consumer_media_id =
-            raplayer_register_media_consumer(&raplayer, receive_frame_callback, p_recv_cb_user_data_args);
+            raplayer_register_media_consumer(&raplayer, spawn_id, receive_frame_callback, p_recv_cb_user_data_args);
 
-    while (true);
+    while (1);
 
 //    uint64_t id = raplayer_spawn_server(&raplayer, port, provide_frame_callback, p_recv_cb_user_data_args);
 //    int32_t status = raplayer_wait_server(&raplayer, id);
