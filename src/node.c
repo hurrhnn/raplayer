@@ -52,7 +52,7 @@ void *ra_send_heartbeat(void *p_heartbeat_sender_args) {
     timespec.tv_sec = 0;
     timespec.tv_nsec = 250000000;
 
-    void* heartbeat_msg = malloc(RA_DWORD + RA_BYTE);
+    void *heartbeat_msg = malloc(RA_DWORD + RA_BYTE);
     memcpy(heartbeat_msg, RA_CTL_HEADER, RA_DWORD);
     memcpy(heartbeat_msg + RA_DWORD, "\x00", RA_BYTE);
 
@@ -98,21 +98,43 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
     uint32_t *ssrc = (uint32_t *) generate_random_bytestream(sizeof(uint32_t));
     uint32_t timestamp = 0;
 
-    ra_media_t *node_sender = NULL, **media = *opus_builder_args->media;
-    for(int i = 0; i < *opus_builder_args->cnt_media; i++) {
-        if(media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE && media[i]->src == node->local_sock)
-        {
-            node_sender = media[i];
-            break;
+    ra_media_t *local_provider = NULL, **media = *opus_builder_args->media;
+    uint64_t cnt_media = *opus_builder_args->cnt_media;
+    uint64_t **media_seq_list = calloc(cnt_media, sizeof(uint64_t *));
+    for(int i = 0; i < cnt_media; i++) {
+        if(media[i]->src == node->local_sock) {
+            bool is_local_provider = false;
+            if ((is_local_provider = (media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE)) || media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) {
+                if(is_local_provider)
+                    local_provider = media[i];
+                media_seq_list[i] = malloc(sizeof(uint64_t));
+                *media_seq_list[i] = media[i]->current.sequence;
+            }
         }
     }
 
-    if(node_sender == NULL) {
-        RA_DEBUG_MORE(YEL, "send not registered! sender will not active.\n");
-        return NULL;
-    }
+    if(local_provider == NULL)
+        RA_DEBUG_MORE(YEL, "local media provider not registered!\n");
 
+    unsigned char *pcm_bytes = malloc(RA_FRAME_SIZE * RA_OPUS_AUDIO_CH * RA_WORD);
     while (true) {
+        if(cnt_media != *opus_builder_args->cnt_media) {
+            uint64_t **new_media_seq_list = calloc(*opus_builder_args->cnt_media, sizeof(uint64_t *));
+            memcpy(new_media_seq_list, media_seq_list, cnt_media * sizeof(uint64_t *));
+            cnt_media = *opus_builder_args->cnt_media;
+
+            media = *opus_builder_args->media;
+            media_seq_list = new_media_seq_list;
+            for(int i = 0; i < cnt_media; i++) {
+                if(media_seq_list[i] == NULL && media[i]->src == node->local_sock
+                    && media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) {
+                    media_seq_list[i] = malloc(sizeof(uint64_t));
+                    *media_seq_list[i] = media[i]->current.sequence;
+                    RA_DEBUG_MORE(GRN, "new remote provider detected, media id: %llu\n", media[i]->id);
+                }
+            }
+        }
+
         pthread_mutex_lock(opus_builder_args->opus_builder_mutex);
         while (*opus_builder_args->turn != 0) {
             pthread_cond_wait(opus_builder_args->opus_builder_cond, opus_builder_args->opus_builder_mutex);
@@ -125,9 +147,30 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
             break;
         }
 
-        /* Read 16bit/sample audio frame. */
-        ra_task_t *send_task = retrieve_task(node_sender->current.queue);
-        unsigned char *pcm_bytes = send_task->data;
+//        while (remote_media_sequence == (seq = node->remote_media->current.sequence));
+//        remote_media_sequence = seq;
+
+        /* Read 16bit/sample audio frames. */
+        media = *opus_builder_args->media;
+        for (int i = 0; i < cnt_media; i++) {
+            if (media_seq_list[i] != NULL && media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE) {
+//                printf("media provider id %d seq:\n", i);
+                int64_t seq_offset = (int64_t) ((*media_seq_list[i]) - media[i]->current.sequence);
+//                printf("seq_offset: %llu - %llu = %lld\n", *media_seq_list[i], media[i]->current.sequence, seq_offset);
+
+                int16_t *frame = (int16_t *) pcm_bytes;
+                ra_task_t *current_frame = retrieve_task(media[i]->current.queue, 3 - seq_offset, false);
+                if(current_frame == NULL)
+                    current_frame = retrieve_task(media[i]->current.queue, -1, false);
+
+                if(current_frame != NULL) {
+                    memcpy(pcm_bytes, current_frame->data, current_frame->data_len);
+//                    for (int j = 0; j < current_frame->data_len / RA_WORD; j++)
+//                        frame[j] = ra_mix_frame_pcm16le(frame[j], ((int16_t *) current_frame->data)[j]);
+                    *media_seq_list[i] = (*media_seq_list[i]) + 1;
+                }
+            }
+        }
 
         /* Convert from little-endian ordering. */
         for (int i = 0; i < RA_OPUS_AUDIO_CH * RA_FRAME_SIZE; i++)
@@ -154,9 +197,10 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
         rtp_header.ssrc = ra_swap_endian_uint32(*ssrc);
         rtp_header.csrc = NULL;
 
-        uint16_t rtp_header_len = sizeof(rtp_header.without_csrc_data) + (sizeof(rtp_header.csrc) * rtp_header.csrc_count);
-        for(int i = 0; i < rtp_header.csrc_count; i++)
-            rtp_header_len += (sizeof (*rtp_header.csrc));
+        uint16_t rtp_header_len =
+                sizeof(rtp_header.without_csrc_data) + (sizeof(rtp_header.csrc) * rtp_header.csrc_count);
+        for (int i = 0; i < rtp_header.csrc_count; i++)
+            rtp_header_len += (sizeof(*rtp_header.csrc));
 
         /* Encrypt the frame. */
         // chacha20_xor(&crypto_context, c_bits, nbBytes); /* use client's crypto context instead of shared context */
@@ -170,7 +214,7 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
         memcpy(opus_frame->data + rtp_header_len, c_bits, opus_frame->data_len);
 
         /* Enqueue the payload. */
-        append_task(node->send_queue, opus_frame);
+        enqueue_task(node->send_queue, opus_frame);
 
         *opus_builder_args->turn = 1;
         pthread_cond_signal(opus_builder_args->opus_builder_cond);
@@ -185,13 +229,14 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
 void *ra_20ms_opus_sender(void *p_opus_sender_args) {
     ra_opus_sender_args_t *opus_sender_args = (ra_opus_sender_args_t *) p_opus_sender_args;
     while (!(opus_sender_args->node->status & RA_NODE_CONNECTION_EXHAUSTED)) {
-        ra_task_t *opus_frame = retrieve_task(opus_sender_args->node->send_queue);
+        ra_task_t *opus_frame = dequeue_task(opus_sender_args->node->send_queue);
         pthread_mutex_lock(opus_sender_args->opus_sender_mutex);
         pthread_cond_wait(opus_sender_args->opus_sender_cond, opus_sender_args->opus_sender_mutex);
         sendto((int) opus_sender_args->node->local_sock->fd, opus_frame->data,
-               opus_frame->data_len, 0, (struct sockaddr *) &opus_sender_args->node->remote_sock->addr, sizeof(struct sockaddr_in));
+               opus_frame->data_len, 0, (struct sockaddr *) &opus_sender_args->node->remote_sock->addr,
+               sizeof(struct sockaddr_in));
         pthread_mutex_unlock(opus_sender_args->opus_sender_mutex);
-        remove_task(opus_frame);
+        destroy_task(opus_frame);
     }
     return NULL;
 }
@@ -241,8 +286,8 @@ void *ra_20ms_opus_timer(void *p_opus_timer_args) {
 
 void *ra_node_frame_receiver(void *p_node_frame_args) {
     ra_node_t *node = ((ra_node_frame_args_t *) p_node_frame_args)->node;
-    ra_media_t **spawn = *((ra_node_frame_args_t *) p_node_frame_args)->media;
-    uint64_t *cnt_spawn = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_media;
+    ra_media_t **media = *((ra_node_frame_args_t *) p_node_frame_args)->media;
+    uint64_t *cnt_media = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_media;
 
     int err;
     OpusDecoder *decoder; /* Create a new decoder state */
@@ -258,26 +303,36 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
     opus_int16 *out = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
     unsigned char *pcm_bytes = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
 
-    ra_media_t *node_spawn = NULL;
-    for(int i = 0; i < *cnt_spawn; i++) {
-        if(spawn[i]->type == RA_MEDIA_TYPE_LOCAL_CONSUME && spawn[i]->src == node->local_sock)
-        {
-            node_spawn = spawn[i];
+    ra_media_t *local_consumer = NULL;
+    for (int i = 0; i < *cnt_media; i++) {
+        if (media[i]->type == RA_MEDIA_TYPE_LOCAL_CONSUME && media[i]->src == node->local_sock) {
+            local_consumer = media[i];
             break;
         }
     }
 
-    if(node_spawn == NULL) {
-        RA_DEBUG_MORE(YEL, "recv not registered! receiver will not active.\n");
+    if (local_consumer == NULL) {
+        RA_DEBUG_MORE(YEL, "local consumer not registered! consumer will not active.\n");
         return NULL;
     }
 
+    uint64_t remote_media_sequence = node->remote_media->current.sequence;
     while (true) {
-        ra_task_t *task = retrieve_task(node->remote_media->current.queue); // TODO: FIX!
-        ra_rtp_t rtp_header = ra_get_rtp_context(task->data);
+        int64_t seq_offset = (int64_t) (remote_media_sequence - node->remote_media->current.sequence);
+//        printf("seq_offset: %llu - %llu = %lld\n", remote_media_sequence, node->remote_media->current.sequence, seq_offset);
+
+        ra_task_t *current_frame = retrieve_task(node->remote_media->current.queue, 3 - seq_offset, false);
+        if(current_frame == NULL)
+            current_frame = retrieve_task(node->remote_media->current.queue, -1, false);
+
+        if(current_frame == NULL)
+            continue;
+
+        remote_media_sequence++;
+        ra_rtp_t rtp_header = ra_get_rtp_context(current_frame->data);
         uint64_t rtp_header_len = ra_get_rtp_length(rtp_header);
 
-        c_bits = (task->data + rtp_header_len);
+        c_bits = (current_frame->data + rtp_header_len);
         if (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') // Detect End of Stream.
             break;
 
@@ -287,7 +342,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
         /* Decode the frame. */
         memset(out, 0x0, RA_FRAME_SIZE * RA_WORD * node->channels);
         int frame_size = opus_decode(decoder, (unsigned char *) c_bits,
-                                     (opus_int32) (task->data_len - rtp_header_len), out, RA_FRAME_SIZE, 0);
+                                     (opus_int32) (current_frame->data_len - rtp_header_len), out, RA_FRAME_SIZE, 0);
         if (frame_size < 0) {
             printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
             node->status = RA_NODE_CONNECTION_EXHAUSTED;
@@ -304,7 +359,7 @@ void *ra_node_frame_receiver(void *p_node_frame_args) {
         frame_size *= (node->channels * RA_WORD);
         ra_task_t *recv_task = create_task(frame_size);
         memcpy(recv_task->data, pcm_bytes, frame_size);
-        append_task(node_spawn->current.queue, recv_task);
+        enqueue_task(local_consumer->current.queue, recv_task);
 //        node_spawn->callback.recv(pcm_bytes, frame_size, node_spawn->cb_user_data);
     }
 

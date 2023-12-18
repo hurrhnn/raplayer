@@ -4,7 +4,7 @@
 void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
     ra_node_t *node = p_ra_packet_dispatcher_args;
     while (!(node->status & RA_NODE_CONNECTION_EXHAUSTED)) {
-        ra_task_t *task = retrieve_task(node->recv_queue);
+        ra_task_t *task = dequeue_task(node->recv_queue);
         if(memcmp(task->data, RA_CTL_HEADER, RA_DWORD) == 0) {
             uint8_t type = -1;
             memcpy(&type, task->data + RA_DWORD, RA_BYTE);
@@ -32,9 +32,10 @@ void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
                 default:
                     break;
             }
-            remove_task(task);
+            destroy_task(task);
         } else {
-            append_task(node->remote_media->current.queue, task);
+            enqueue_task_with_removal(node->remote_media->current.queue, task);
+            node->remote_media->current.sequence++;
         }
 
     }

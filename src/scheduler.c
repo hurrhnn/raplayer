@@ -116,7 +116,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     node[id]->send_queue = malloc(sizeof(ra_queue_t));
 
                     uint64_t media_id = ra_media_register(ra_packet_scheduler_args->media,
-                                                          ra_packet_scheduler_args->cnt_media, RA_MEDIA_TYPE_REMOTE_PROVIDE, 5,
+                                                          ra_packet_scheduler_args->cnt_media, RA_MEDIA_TYPE_REMOTE_PROVIDE, 7,
                                                           NULL, NULL);
                     ra_media_t **media = *ra_packet_scheduler_args->media;
                     media[media_id]->src = local_sock[local_sock_idx];
@@ -126,7 +126,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
 
                     init_queue(node[id]->recv_queue, 0);
                     init_queue(node[id]->send_queue, 0);
-                    append_task(node[id]->recv_queue, task);
+                    enqueue_task(node[id]->recv_queue, task);
 
 //                            pthread_rwlock_unlock(task_scheduler_args->client_context_rwlock);
 //                            RA_DEBUG_MORE(GRN, "Node context write lock released.\n");
@@ -156,7 +156,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     pthread_create(&frame_sender, NULL, ra_node_frame_sender, node_frame_args);
                     pthread_create(&frame_receiver, NULL, ra_node_frame_receiver, node_frame_args);
                 } else {
-                    append_task(node[node_id]->recv_queue, task);
+                    enqueue_task(node[node_id]->recv_queue, task);
                 }
             }
         }
