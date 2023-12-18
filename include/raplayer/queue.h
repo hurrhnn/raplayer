@@ -48,14 +48,18 @@ int is_full(const ra_queue_t *q);
 
 int is_empty(const ra_queue_t *q);
 
-bool append_task(ra_queue_t *q, ra_task_t *task);
+uint64_t get_size(ra_queue_t *q);
 
-bool append_task_with_removal(ra_queue_t *q, ra_task_t *task);
+bool enqueue_task(ra_queue_t *q, ra_task_t *task);
 
-ra_task_t *retrieve_task(ra_queue_t *q);
+bool enqueue_task_with_removal(ra_queue_t *q, ra_task_t *task);
+
+ra_task_t *dequeue_task(ra_queue_t *q);
 
 ra_task_t* create_task(uint32_t len);
 
-void remove_task(ra_task_t *task);
+ra_task_t *retrieve_task(ra_queue_t *q, int64_t index, bool blocking);
+
+void destroy_task(ra_task_t *task);
 
 #endif
