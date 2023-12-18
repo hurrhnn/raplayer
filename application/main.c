@@ -482,7 +482,10 @@ int main(int argc, char **argv) {
     int64_t consumer_media_id =
             raplayer_register_media_consumer(&raplayer, spawn_id, receive_frame_callback, p_recv_cb_user_data_args);
 
-    while (1);
+    /* infinity waits without busy loop */
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+    pthread_cond_wait(&cond, &mutex);
 
 //    uint64_t id = raplayer_spawn_server(&raplayer, port, provide_frame_callback, p_recv_cb_user_data_args);
 //    int32_t status = raplayer_wait_server(&raplayer, id);
