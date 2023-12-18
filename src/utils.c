@@ -33,8 +33,26 @@ const char *raplayer_strerror(int64_t err) {
     }
 }
 
+void ra_profile_f() {
+}
+
 bool ra_compare_sockaddr(struct sockaddr_in *s1, struct sockaddr_in *s2) {
     return ((s1->sin_addr.s_addr == s2->sin_addr.s_addr) && (s1->sin_port == s2->sin_port));
+}
+
+int16_t ra_mix_frame_pcm16le(int16_t s1, int16_t s2) {
+    int a = s1, b = s2;
+    int m;
+
+    if ((a < 32768) || (b < 32768))
+        m = a * b / 32768;
+    else
+        m = 2 * (a + b) - (a * b) / 32768 - 65536;
+
+    if (m == 65536) m = 65535;
+    m -= 32768;
+
+    return (int16_t) m;
 }
 
 u_int16_t ra_swap_endian_uint16(u_int16_t number) {

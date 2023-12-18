@@ -177,6 +177,10 @@ typedef struct {
     struct sockaddr_in addr;
 } ra_sock_remote_t;
 
+void ra_profile_f();
+
+int16_t ra_mix_frame_pcm16le(int16_t s1, int16_t s2);
+
 const char *raplayer_strerror(int64_t err);
 
 u_int16_t ra_swap_endian_uint16(u_int16_t number);
