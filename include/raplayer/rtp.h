@@ -24,8 +24,12 @@ typedef union {
     uint8_t combined_data[0x14];
 } ra_rtp_t;
 
-ra_rtp_t ra_get_rtp_context(void* buffer);
+ra_rtp_t ra_rtp_get_context(void* buffer);
 
-uint64_t ra_get_rtp_length(ra_rtp_t rtp_header);
+uint64_t ra_rtp_get_length(ra_rtp_t rtp_header);
+
+void ra_rtp_init_context(ra_rtp_t* rtp_header);
+
+void ra_rtp_set_next(ra_rtp_t *rtp_header, uint32_t timestamp);
 
 #endif //RAPLAYER_RTP_H
