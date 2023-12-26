@@ -26,6 +26,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
+    pthread_t *frame_receiver = NULL;
     ra_packet_scheduler_args_t *ra_packet_scheduler_args = (ra_packet_scheduler_args_t *) p_ra_packet_scheduler_args;
 
     while (true) {
@@ -115,9 +116,12 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     node[id]->recv_queue = malloc(sizeof(ra_queue_t));
                     node[id]->send_queue = malloc(sizeof(ra_queue_t));
 
-                    uint64_t media_id = ra_media_register(ra_packet_scheduler_args->media,
-                                                          ra_packet_scheduler_args->cnt_media, RA_MEDIA_TYPE_REMOTE_PROVIDE, 7,
-                                                          NULL, NULL);
+                    ra_media_register_t media_register = {ra_packet_scheduler_args->media,
+                                                          ra_packet_scheduler_args->cnt_media,
+                                                          ra_packet_scheduler_args->media_mutex,
+                                                          RA_MEDIA_TYPE_REMOTE_PROVIDE, 7};
+                    uint64_t media_id = ra_media_register(media_register, NULL, NULL);
+
                     ra_media_t **media = *ra_packet_scheduler_args->media;
                     media[media_id]->src = local_sock[local_sock_idx];
                     media[media_id]->status = RA_MEDIA_INITIATED;
@@ -137,7 +141,7 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     pthread_t packet_dispatcher;
                     pthread_create(&packet_dispatcher, NULL, dispatch_packet, node[id]);
 
-                    pthread_t frame_sender, frame_receiver;
+                    pthread_t frame_sender;
                     ra_node_frame_args_t *node_frame_args = malloc(sizeof(ra_node_frame_args_t));
                     node_frame_args->node = node[id];
                     node_frame_args->media = ra_packet_scheduler_args->media;
@@ -154,7 +158,10 @@ _Noreturn void *schedule_packet(void *p_ra_packet_scheduler_args) {
                     *ra_packet_scheduler_args->cnt_node = (*ra_packet_scheduler_args->cnt_node) + 1;
 
                     pthread_create(&frame_sender, NULL, ra_node_frame_sender, node_frame_args);
-                    pthread_create(&frame_receiver, NULL, ra_node_frame_receiver, node_frame_args);
+                    if(frame_receiver == NULL) {
+                        frame_receiver = malloc(sizeof(pthread_t));
+                        pthread_create(frame_receiver, NULL, ra_node_frame_receiver, node_frame_args);
+                    }
                 } else {
                     enqueue_task(node[node_id]->recv_queue, task);
                 }

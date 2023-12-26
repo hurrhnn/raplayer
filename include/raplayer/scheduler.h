@@ -49,6 +49,7 @@ typedef struct {
 
     ra_media_t ***media;
     uint64_t *cnt_media;
+    pthread_mutex_t *media_mutex;
 } ra_packet_scheduler_args_t;
 
 _Noreturn void *schedule_packet(void *);
