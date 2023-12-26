@@ -19,6 +19,7 @@ typedef struct {
 
     uint64_t cnt_media;
     ra_media_t **media;
+    pthread_mutex_t media_mutex;
 } raplayer_t;
 
 #endif //RAPLAYER_RAPLAYER_INL_H
