@@ -302,9 +302,13 @@ void receive_frame_callback(void *frame, int frame_size, void *user_args) {
 
 void *provide_frame_callback(void *user_args) {
     void **callback_user_data_args = user_args;
-    fread((void *) callback_user_data_args[2], RA_WORD * RA_OPUS_AUDIO_CH, RA_FRAME_SIZE,
+    void* buffer = malloc(RA_WORD * RA_OPUS_AUDIO_CH * RA_FRAME_SIZE), *prev_buffer = (void *) callback_user_data_args[2];
+    fread(buffer, RA_WORD * RA_OPUS_AUDIO_CH, RA_FRAME_SIZE,
           (void *) callback_user_data_args[1]);
-    return callback_user_data_args[2];
+
+    free(prev_buffer);
+    callback_user_data_args[2] = buffer;
+    return buffer;
 }
 
 int main(int argc, char **argv) {
@@ -443,7 +447,7 @@ int main(int argc, char **argv) {
     void **p_send_cb_user_data_args = calloc(sizeof(void *), RA_DWORD);
     p_send_cb_user_data_args[0] = &raplayer;
     p_send_cb_user_data_args[1] = fin;
-    p_send_cb_user_data_args[2] = malloc(RA_FRAME_SIZE * RA_OPUS_AUDIO_CH * RA_WORD);
+    p_send_cb_user_data_args[2] = malloc(RA_FRAME_SIZE * RA_OPUS_AUDIO_CH * RA_WORD); // initial buffer
 
     void **p_recv_cb_user_data_args = calloc(sizeof(void *), RA_DWORD * 2);
     p_recv_cb_user_data_args[0] = &raplayer;
