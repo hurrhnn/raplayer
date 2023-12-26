@@ -34,10 +34,9 @@ void *dispatch_packet(void *p_ra_packet_dispatcher_args) {
             }
             destroy_task(task);
         } else {
+//            printf("%d\n", ra_swap_endian_uint16(ra_rtp_get_context(task->data).sequence));
             enqueue_task_with_removal(node->remote_media->current.queue, task);
-            node->remote_media->current.sequence++;
         }
-
     }
     return NULL;
 }
