@@ -23,12 +23,14 @@ void raplayer_init_context(raplayer_t *raplayer) {
     scheduler_args->media = &raplayer->media;
     scheduler_args->cnt_media = &raplayer->cnt_media;
 
+    pthread_mutex_init(&raplayer->media_mutex, NULL);
+    scheduler_args->media_mutex = &raplayer->media_mutex;
+
     pthread_t packet_scheduler;
     pthread_create(&packet_scheduler, NULL, schedule_packet, scheduler_args);
 }
 
 int64_t raplayer_spawn(raplayer_t *raplayer, bool mode, char *address, int port) {
-
     void *before_address = raplayer->fds;
     ra_realloc(raplayer->fds, sizeof(struct pollfd) * ((raplayer->cnt_fds) + 1));
     RA_DEBUG_MORE(GRN, "Reallocated poll fds context %p to %p, size: 0x%llX\n",
