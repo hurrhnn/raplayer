@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <opus/opus.h>
 
 #ifndef RAPLAYER_MEDIA_H
 #define RAPLAYER_MEDIA_H
@@ -18,7 +19,7 @@ typedef enum {
 
 typedef struct {
     uint64_t id;
-    void* src;
+    void *src;
     uint8_t type;
     ra_media_status_t status;
     union {
@@ -26,17 +27,26 @@ typedef struct {
         void (*recv)(void *frame, int frame_size, void *user_data);
     } callback;
 
+    union {
+        OpusEncoder *encoder;
+        OpusDecoder *decoder;
+    } opus;
+
     void *cb_user_data;
 
     struct {
         ra_queue_t *queue;
-        pthread_rwlock_t rwlock;
-        uint64_t sequence;
     } current;
 } ra_media_t;
 
-int64_t ra_media_register(ra_media_t ***p_media, uint64_t *cnt_media, uint8_t type,
-                          uint64_t queue_size, void *callback,
-                          void *cb_user_data);
+typedef struct {
+    ra_media_t ***p_media;
+    uint64_t *cnt_media;
+    pthread_mutex_t *mutex;
+    uint8_t type;
+    uint64_t queue_size;
+} ra_media_register_t;
+
+int64_t ra_media_register(ra_media_register_t media_register_ctx, void *callback, void *cb_user_data);
 
 #endif //RAPLAYER_MEDIA_H
