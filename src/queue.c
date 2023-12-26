@@ -19,13 +19,14 @@
 */
 
 #include <string.h>
+#include <stdio.h>
 #include "raplayer/queue.h"
 #include "raplayer/utils.h"
 
 void init_queue(ra_queue_t *q, uint64_t size) {
     q->rear = 0;
     q->front = 0;
-    q->size = (size == 0 ? RA_MAX_QUEUE_SIZE : size + 1);
+    q->size = (size == 0 ? RA_MAX_QUEUE_SIZE : size);
 
     q->tasks = malloc(sizeof(ra_task_t *) * q->size);
     pthread_mutex_init(&q->mutex, NULL);
@@ -59,13 +60,13 @@ bool enqueue_task_with_removal(ra_queue_t *q, ra_task_t *task) {
     pthread_mutex_lock(&q->mutex);
 
     while (is_full(q)) {
-        q->front = (q->front + 1) % q->size;
         ra_task_t *removed_task = q->tasks[q->front];
-//        destroy_task(removed_task);
+//        q->tasks[q->front] = NULL;
+        q->front = (q->front + 1) % (q->size);
     }
 
-    q->rear = (q->rear + 1) % q->size;
     q->tasks[q->rear] = task;
+    q->rear = (q->rear + 1) % (q->size);
 
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);
@@ -75,8 +76,8 @@ bool enqueue_task_with_removal(ra_queue_t *q, ra_task_t *task) {
 bool enqueue_task(ra_queue_t *q, ra_task_t *task) {
     pthread_mutex_lock(&q->mutex);
     while (is_full(q)) { pthread_cond_wait(&q->empty, &q->mutex); }
-    q->rear = (q->rear + 1) % q->size;
     q->tasks[q->rear] = task;
+    q->rear = (q->rear + 1) % q->size;
     pthread_cond_signal(&q->fill);
     pthread_mutex_unlock(&q->mutex);
     return true;
@@ -85,26 +86,16 @@ bool enqueue_task(ra_queue_t *q, ra_task_t *task) {
 ra_task_t *dequeue_task(ra_queue_t *q) {
     pthread_mutex_lock(&q->mutex);
     while (is_empty(q)) { pthread_cond_wait(&q->fill, &q->mutex); }
-    q->front = (q->front + 1) % q->size;
     ra_task_t *current_task = q->tasks[q->front];
+    q->tasks[q->front] = NULL;
+    q->front = (q->front + 1) % q->size;
     pthread_cond_signal(&q->empty);
     pthread_mutex_unlock(&q->mutex);
     return current_task;
 }
 
-uint64_t get_size(ra_queue_t *q) {
-    uint64_t size;
-    if (q->front <= q->rear) {
-        size = (int64_t) (q->rear - q->front);
-    } else {
-        size = (int64_t) ((q->rear + q->size - q->front) % q->size);
-    }
-    return size;
-}
-
 ra_task_t *retrieve_task(ra_queue_t *q, int64_t index, bool blocking) {
     pthread_mutex_lock(&q->mutex);
-    uint64_t size = get_size(q);
 
     while (true) {
         if (is_empty(q)) {
@@ -118,21 +109,19 @@ ra_task_t *retrieve_task(ra_queue_t *q, int64_t index, bool blocking) {
         }
 
         if (index == -1) {
-            index = (int64_t) q->rear;
+            index = (int64_t) ((q->rear - 1) % q->size);
             break;
         } else {
             if(blocking) {
-                while (index + 1 > size) {
+                while (q->tasks[index] == NULL) {
                     pthread_cond_wait(&q->fill, &q->mutex);
-                    size = get_size(q);
                 }
             } else {
-                if(index + 1 > size) {
+                if(q->tasks[index] == NULL) {
                     pthread_mutex_unlock(&q->mutex);
                     return NULL;
                 }
             }
-            index++;
             break;
         }
     }

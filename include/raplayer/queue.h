@@ -48,8 +48,6 @@ int is_full(const ra_queue_t *q);
 
 int is_empty(const ra_queue_t *q);
 
-uint64_t get_size(ra_queue_t *q);
-
 bool enqueue_task(ra_queue_t *q, ra_task_t *task);
 
 bool enqueue_task_with_removal(ra_queue_t *q, ra_task_t *task);
