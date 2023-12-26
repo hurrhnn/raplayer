@@ -70,67 +70,56 @@ void *ra_send_heartbeat(void *p_heartbeat_sender_args) {
 void *ra_20ms_opus_builder(void *p_opus_builder_args) {
     ra_opus_builder_args_t *opus_builder_args = (ra_opus_builder_args_t *) p_opus_builder_args;
     ra_node_t *node = opus_builder_args->node;
-
-    /* Create a new encoder state. */
-    int err;
-    OpusEncoder *encoder;
-    encoder = opus_encoder_create((opus_int32) RA_OPUS_AUDIO_SR, RA_OPUS_AUDIO_CH,
-                                  RA_OPUS_APPLICATION,
-                                  &err);
-    if (err < 0) {
-        RA_ERROR("Error: failed to create an encoder - %s\n", opus_strerror(err));
-        node->status = RA_NODE_CONNECTION_EXHAUSTED;
-        return (void *) RA_CREATE_OPUS_ENCODER_FAILED;
-    }
-
-    if (opus_encoder_ctl(encoder,
-                         OPUS_SET_BITRATE(RA_OPUS_AUDIO_SR * RA_OPUS_AUDIO_CH)) <
-        0) {
-        RA_ERROR("Error: failed to set bitrate - %s\n", opus_strerror(err));
-        node->status = RA_NODE_CONNECTION_EXHAUSTED;
-        return (void *) RA_OPUS_ENCODER_CTL_FAILED;
-    }
-
-    opus_int16 in[RA_FRAME_SIZE * RA_OPUS_AUDIO_CH];
-    unsigned char c_bits[RA_FRAME_SIZE]; // TODO: need to change for correspond adaptive latency
-
-    uint32_t sequence = 0;
-    uint32_t *ssrc = (uint32_t *) generate_random_bytestream(sizeof(uint32_t));
-    uint32_t timestamp = 0;
+    OpusRepacketizer *repacketizer = opus_repacketizer_create();
 
     ra_media_t *local_provider = NULL, **media = *opus_builder_args->media;
     uint64_t cnt_media = *opus_builder_args->cnt_media;
-    uint64_t **media_seq_list = calloc(cnt_media, sizeof(uint64_t *));
-    for(int i = 0; i < cnt_media; i++) {
-        if(media[i]->src == node->local_sock) {
+    int64_t *media_seq_list = calloc(cnt_media, sizeof(int64_t));
+    int64_t *media_seq_adj_list = calloc(cnt_media, sizeof(int64_t));
+    for (int i = 0; i < cnt_media; i++) {
+        if (media[i]->src == node->local_sock) {
             bool is_local_provider = false;
-            if ((is_local_provider = (media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE)) || media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) {
-                if(is_local_provider)
+            if (((is_local_provider = (media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE)) ||
+                 media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) && !(media[i]->status & RA_MEDIA_TERMINATED) &&
+                media[i] != node->remote_media) {
+                if (is_local_provider)
                     local_provider = media[i];
-                media_seq_list[i] = malloc(sizeof(uint64_t));
-                *media_seq_list[i] = media[i]->current.sequence;
+                media_seq_list[i] = -1;
+                media_seq_adj_list[i] = -1;
             }
         }
     }
 
-    if(local_provider == NULL)
-        RA_DEBUG_MORE(YEL, "local media provider not registered!\n");
+    if (local_provider == NULL)
+        RA_DEBUG_MORE(YEL, "[node] id: %llu, local media provider not registered\n", node->id);
 
-    unsigned char *pcm_bytes = malloc(RA_FRAME_SIZE * RA_OPUS_AUDIO_CH * RA_WORD);
+    ra_rtp_t rtp_header;
+    ra_rtp_init_context(&rtp_header);
     while (true) {
-        if(cnt_media != *opus_builder_args->cnt_media) {
-            uint64_t **new_media_seq_list = calloc(*opus_builder_args->cnt_media, sizeof(uint64_t *));
-            memcpy(new_media_seq_list, media_seq_list, cnt_media * sizeof(uint64_t *));
-            cnt_media = *opus_builder_args->cnt_media;
-
+        if (cnt_media != *opus_builder_args->cnt_media) {
             media = *opus_builder_args->media;
-            media_seq_list = new_media_seq_list;
-            for(int i = 0; i < cnt_media; i++) {
-                if(media_seq_list[i] == NULL && media[i]->src == node->local_sock
-                    && media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) {
-                    media_seq_list[i] = malloc(sizeof(uint64_t));
-                    *media_seq_list[i] = media[i]->current.sequence;
-                    RA_DEBUG_MORE(GRN, "new remote provider detected, media id: %llu\n", media[i]->id);
+            cnt_media = *opus_builder_args->cnt_media;
+            ra_realloc(media_seq_list, cnt_media * sizeof(int64_t));
+        }
+
+        for (int i = 0; i < cnt_media; i++) {
+            if (!(media[i]->status & RA_MEDIA_TERMINATED) && media_seq_list[i] == 0 && media[i]->src == node->local_sock
+                && media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE && media[i] != node->remote_media) {
+                media_seq_list[i] = -1;
+                media_seq_adj_list[i] = -1;
+                RA_DEBUG_MORE(GRN, "[node] id: %llu, new remote provider detected - media id: %llu.\n", node->id,
+                              media[i]->id);
+            }
+        }
+
+        for (int i = 0; i < cnt_media; i++) {
+            if (!(media[i]->status & RA_MEDIA_TERMINATED) && media_seq_list[i] == -1) {
+                ra_task_t *frame = retrieve_task(media[i]->current.queue, -1, false);
+                if (frame != NULL) {
+                    media_seq_list[i] = ra_swap_endian_uint16(ra_rtp_get_context(frame->data).sequence);
+                    media_seq_adj_list[i] = 0;
+                    RA_DEBUG_MORE(GRN, "[node] id: %llu, media id: %llu, set rtp sequence to %llu.\n", node->id,
+                                  media[i]->id, media_seq_list[i]);
                 }
             }
         }
@@ -147,82 +136,74 @@ void *ra_20ms_opus_builder(void *p_opus_builder_args) {
             break;
         }
 
-//        while (remote_media_sequence == (seq = node->remote_media->current.sequence));
-//        remote_media_sequence = seq;
-
-        /* Read 16bit/sample audio frames. */
         media = *opus_builder_args->media;
+        repacketizer = opus_repacketizer_init(repacketizer);
         for (int i = 0; i < cnt_media; i++) {
-            if (media_seq_list[i] != NULL && media[i]->type == RA_MEDIA_TYPE_LOCAL_PROVIDE) {
+            if (media_seq_list[i] > 0) {
+                for (int j = 0; j < 7; j++) {
+                    ra_task_t *current_frame = retrieve_task(media[i]->current.queue, j, false);
+                    if (current_frame != NULL) {
+                        ra_rtp_t current_rtp_header = ra_rtp_get_context(current_frame->data);
+//                        printf("[%llu] %hu, %lld\n", node->id, ra_swap_endian_uint16(current_rtp_header.sequence), media_seq_list[i]);
+                        opus_int32 current_rtp_length = (opus_int32) ra_rtp_get_length(current_rtp_header);
+                        if ((media_seq_list[i]) ==
+                            ra_swap_endian_uint16(current_rtp_header.sequence)) {
+                            opus_repacketizer_cat(repacketizer, current_frame->data + current_rtp_length,
+                                                  ((opus_int32) current_frame->data_len - current_rtp_length));
+                            media_seq_list[i] = (media_seq_list[i]) + 1;
+                            media_seq_adj_list[i] = 0;
+                            free(current_frame);
+                            break;
+                        } else
+                            media_seq_adj_list[i] = 1;
+                    }
+                }
+
+                if (media_seq_adj_list[i] == 1) {
+                    media_seq_adj_list[i] = 0;
+                    media_seq_list[i] = ra_swap_endian_uint16(
+                            ra_rtp_get_context(retrieve_task(media[i]->current.queue, -1, false)->data).sequence);
+                    media_seq_list[i] = (media_seq_list[i] == 0) ? 1 : media_seq_list[i];
+                    RA_DEBUG_MORE(YEL, "[node] id: %llu, media id: %llu, adj sequence to %llu.\n", node->id,
+                                  media[i]->id, media_seq_list[i]);
+                }
+//                printf("%d\n", repacketized_frame->data_len);
 //                printf("media provider id %d seq:\n", i);
-                int64_t seq_offset = (int64_t) ((*media_seq_list[i]) - media[i]->current.sequence);
+//                int64_t seq_offset = (int64_t) ((*media_seq_list[i]) - media[i]->current.sequence);
 //                printf("seq_offset: %llu - %llu = %lld\n", *media_seq_list[i], media[i]->current.sequence, seq_offset);
 
-                int16_t *frame = (int16_t *) pcm_bytes;
-                ra_task_t *current_frame = retrieve_task(media[i]->current.queue, 3 - seq_offset, false);
-                if(current_frame == NULL)
-                    current_frame = retrieve_task(media[i]->current.queue, -1, false);
+//                if (current_frame == NULL)
+//                    current_frame = retrieve_task(media[i]->current.queue, -1, false);
 
-                if(current_frame != NULL) {
-                    memcpy(pcm_bytes, current_frame->data, current_frame->data_len);
+//                if (current_frame != NULL) {
+//                    memcpy(pcm_bytes, current_frame->data, current_frame->data_len);
 //                    for (int j = 0; j < current_frame->data_len / RA_WORD; j++)
 //                        frame[j] = ra_mix_frame_pcm16le(frame[j], ((int16_t *) current_frame->data)[j]);
-                    *media_seq_list[i] = (*media_seq_list[i]) + 1;
-                }
+//                    *media_seq_list[i] = (*media_seq_list[i]) + 1;
+
+                /* Enqueue the payload. */
+//                    printf("seq: %d\n", ra_rtp_get_context(current_frame->data).sequence);
+//                    enqueue_task(node->send_queue, current_frame);
+//                }
             }
         }
 
-        /* Convert from little-endian ordering. */
-        for (int i = 0; i < RA_OPUS_AUDIO_CH * RA_FRAME_SIZE; i++)
-            in[i] = (opus_int16) (pcm_bytes[2 * i + 1] << 8 | pcm_bytes[2 * i]);
+        ra_task_t *repacketized_frame = create_task(RA_MAX_DATA_SIZE);
+        ra_rtp_set_next(&rtp_header, 960);
+        uint64_t rtp_header_len = ra_rtp_get_length(rtp_header);
+        memcpy(repacketized_frame->data, rtp_header.without_csrc_data, rtp_header_len);
+        repacketized_frame->data_len = rtp_header_len;
 
-        /* Encode the frame. */
-        int nbBytes = opus_encode(encoder, in, RA_FRAME_SIZE, c_bits, RA_FRAME_SIZE);
-        if (nbBytes < 0) {
-            RA_ERROR("Error: opus encode failed - %s\n", opus_strerror(nbBytes));
-            node->status = RA_NODE_CONNECTION_EXHAUSTED;
-            return (void *) RA_OPUS_ENCODE_FAILED;
+        int nbBytes = opus_repacketizer_out(repacketizer, repacketized_frame->data + rtp_header_len, RA_FRAME_SIZE);
+        if (nbBytes > 0) {
+            repacketized_frame->data_len += nbBytes;
+            enqueue_task(node->send_queue, repacketized_frame);
         }
-
-        /* Create payload. */
-        ra_rtp_t rtp_header;
-        rtp_header.version = 2;
-        rtp_header.padding = 0;
-        rtp_header.extension = 0;
-        rtp_header.csrc_count = 0;
-        rtp_header.marker = 0;
-        rtp_header.payload_type = 120;
-        rtp_header.sequence = ra_swap_endian_uint16((++sequence) % 0x10000);
-        rtp_header.timestamp = ra_swap_endian_uint32((timestamp = timestamp + 960) % 0x100000000);
-        rtp_header.ssrc = ra_swap_endian_uint32(*ssrc);
-        rtp_header.csrc = NULL;
-
-        uint16_t rtp_header_len =
-                sizeof(rtp_header.without_csrc_data) + (sizeof(rtp_header.csrc) * rtp_header.csrc_count);
-        for (int i = 0; i < rtp_header.csrc_count; i++)
-            rtp_header_len += (sizeof(*rtp_header.csrc));
-
-        /* Encrypt the frame. */
-        // chacha20_xor(&crypto_context, c_bits, nbBytes); /* use client's crypto context instead of shared context */
-        // chacha20_xor(&client->crypto_context, opus_frame->data + nbBytes_len + sizeof(OPUS_FLAG) - 1,nbBytes);
-
-        ra_task_t *opus_frame = create_task(RA_MAX_DATA_SIZE);
-        memset(opus_frame->data, 0x0, opus_frame->data_len);
-
-        opus_frame->data_len = (ssize_t) (rtp_header_len + nbBytes);
-        memcpy(opus_frame->data, rtp_header.without_csrc_data, rtp_header_len);
-        memcpy(opus_frame->data + rtp_header_len, c_bits, opus_frame->data_len);
-
-        /* Enqueue the payload. */
-        enqueue_task(node->send_queue, opus_frame);
 
         *opus_builder_args->turn = 1;
         pthread_cond_signal(opus_builder_args->opus_builder_cond);
         pthread_mutex_unlock(opus_builder_args->opus_builder_mutex);
     }
-
-    /* Destroy the encoder state. */
-    opus_encoder_destroy(encoder);
     return NULL;
 }
 
@@ -285,89 +266,117 @@ void *ra_20ms_opus_timer(void *p_opus_timer_args) {
 }
 
 void *ra_node_frame_receiver(void *p_node_frame_args) {
-    ra_node_t *node = ((ra_node_frame_args_t *) p_node_frame_args)->node;
-    ra_media_t **media = *((ra_node_frame_args_t *) p_node_frame_args)->media;
-    uint64_t *cnt_media = ((ra_node_frame_args_t *) p_node_frame_args)->cnt_media;
+    ra_node_frame_args_t *node_frame_args = ((ra_node_frame_args_t *) p_node_frame_args);
+    ra_node_t *node = node_frame_args->node;
+    ra_media_t **media = *node_frame_args->media;
+    uint64_t cnt_media = *node_frame_args->cnt_media;
 
-    int err;
-    OpusDecoder *decoder; /* Create a new decoder state */
-    decoder = opus_decoder_create(node->sample_rate, node->channels, &err);
-    if (err < 0) {
-        node->status = RA_NODE_CONNECTION_EXHAUSTED;
-        return (void *) RA_CREATE_OPUS_DECODER_FAILED;
+    OpusRepacketizer *repacketizer = opus_repacketizer_create();
+
+    int64_t *media_seq_list = calloc(cnt_media, sizeof(int64_t));
+    int64_t *media_seq_adj_list = calloc(cnt_media, sizeof(int64_t));
+    for (int i = 0; i < cnt_media; i++) {
+        if (media[i]->src == node->local_sock) {
+            if (media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE && !(media[i]->status & RA_MEDIA_TERMINATED)) {
+                media_seq_list[i] = -1;
+                media_seq_adj_list[i] = -1;
+            }
+        }
     }
 
 //    chacha20_init_context(&ctx, crypto_payload, crypto_payload + CHACHA20_NONCEBYTES, 0);
 
-    unsigned char *c_bits;
-    opus_int16 *out = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
-    unsigned char *pcm_bytes = malloc(RA_FRAME_SIZE * RA_WORD * node->channels);
+//    if (local_consumer == NULL) {
+//        RA_DEBUG_MORE(YEL, "local consumer not registered! consumer will not active.\n");
+//        return NULL;
+//    }
 
-    ra_media_t *local_consumer = NULL;
-    for (int i = 0; i < *cnt_media; i++) {
-        if (media[i]->type == RA_MEDIA_TYPE_LOCAL_CONSUME && media[i]->src == node->local_sock) {
-            local_consumer = media[i];
-            break;
-        }
-    }
-
-    if (local_consumer == NULL) {
-        RA_DEBUG_MORE(YEL, "local consumer not registered! consumer will not active.\n");
-        return NULL;
-    }
-
-    uint64_t remote_media_sequence = node->remote_media->current.sequence;
+    struct timespec start_timespec, current_time, calculated_delay;
+    clock_gettime(CLOCK_MONOTONIC, &start_timespec);
+    time_t start_time = (start_timespec.tv_sec * 1000000000L) + start_timespec.tv_nsec, time, offset = 0L;
     while (true) {
-        int64_t seq_offset = (int64_t) (remote_media_sequence - node->remote_media->current.sequence);
-//        printf("seq_offset: %llu - %llu = %lld\n", remote_media_sequence, node->remote_media->current.sequence, seq_offset);
-
-        ra_task_t *current_frame = retrieve_task(node->remote_media->current.queue, 3 - seq_offset, false);
-        if(current_frame == NULL)
-            current_frame = retrieve_task(node->remote_media->current.queue, -1, false);
-
-        if(current_frame == NULL)
-            continue;
-
-        remote_media_sequence++;
-        ra_rtp_t rtp_header = ra_get_rtp_context(current_frame->data);
-        uint64_t rtp_header_len = ra_get_rtp_length(rtp_header);
-
-        c_bits = (current_frame->data + rtp_header_len);
-        if (c_bits[0] == 'E' && c_bits[1] == 'O' && c_bits[2] == 'S') // Detect End of Stream.
-            break;
-
-        /* Decrypt the frame. */
-//        chacha20_xor(&ctx, *calculated_c_bits, nbBytes);
-
-        /* Decode the frame. */
-        memset(out, 0x0, RA_FRAME_SIZE * RA_WORD * node->channels);
-        int frame_size = opus_decode(decoder, (unsigned char *) c_bits,
-                                     (opus_int32) (current_frame->data_len - rtp_header_len), out, RA_FRAME_SIZE, 0);
-        if (frame_size < 0) {
-            printf("Error: Opus decoder failed - %s\n", opus_strerror(frame_size));
-            node->status = RA_NODE_CONNECTION_EXHAUSTED;
-            return (void *) RA_OPUS_DECODE_FAILED;
+        if (cnt_media != *node_frame_args->cnt_media) {
+            media = *node_frame_args->media;
+            cnt_media = *node_frame_args->cnt_media;
+            ra_realloc(media_seq_list, cnt_media * sizeof(int64_t));
         }
 
-        /* Convert to little-endian ordering. */
-        for (int i = 0; i < node->channels * frame_size; i++) {
-            pcm_bytes[2 * i] = out[i] & 0xFF;
-            pcm_bytes[2 * i + 1] = (out[i] >> 8) & 0xFF;
+        for (int i = 0; i < cnt_media; i++) {
+            if (!(media[i]->status & RA_MEDIA_TERMINATED) && media_seq_list[i] == 0 &&
+                media[i]->src == node->local_sock && media[i]->type == RA_MEDIA_TYPE_REMOTE_PROVIDE) {
+                media_seq_list[i] = -1;
+                media_seq_adj_list[i] = -1;
+                RA_DEBUG_MORE(GRN, "[node] id: %llu, new remote provider detected - media id: %llu.\n", node->id,
+                              media[i]->id);
+            }
         }
 
-        // TODO: implement the client-side time synchronized callback
-        frame_size *= (node->channels * RA_WORD);
-        ra_task_t *recv_task = create_task(frame_size);
-        memcpy(recv_task->data, pcm_bytes, frame_size);
-        enqueue_task(local_consumer->current.queue, recv_task);
-//        node_spawn->callback.recv(pcm_bytes, frame_size, node_spawn->cb_user_data);
+        for (int i = 0; i < cnt_media; i++) {
+            if (!(media[i]->status & RA_MEDIA_TERMINATED) && media_seq_list[i] == -1) {
+                ra_task_t *frame = retrieve_task(media[i]->current.queue, -1, false);
+                if (frame != NULL) {
+                    media_seq_list[i] = ra_swap_endian_uint16(ra_rtp_get_context(frame->data).sequence);
+                    media_seq_adj_list[i] = 0;
+                    RA_DEBUG_MORE(GRN, "[node] id: %llu, media id: %llu, set rtp sequence to %llu.\n", node->id,
+                                  media[i]->id, media_seq_list[i]);
+                }
+            }
+        }
+
+        offset += 20000000L;
+        time = start_time + offset;
+
+        repacketizer = opus_repacketizer_init(repacketizer);
+        for (int i = 0; i < cnt_media; i++) {
+            if (media_seq_list[i] > 0) {
+                for (int j = 0; j < 7; j++) {
+                    ra_task_t *current_frame = retrieve_task(media[i]->current.queue, j, false);
+                    if (current_frame != NULL) {
+                        ra_rtp_t current_rtp_header = ra_rtp_get_context(current_frame->data);
+                        opus_int32 current_rtp_length = (opus_int32) ra_rtp_get_length(current_rtp_header);
+                        if ((media_seq_list[i]) ==
+                            ra_swap_endian_uint16(current_rtp_header.sequence)) {
+                            opus_repacketizer_cat(repacketizer, current_frame->data + current_rtp_length,
+                                                  ((opus_int32) current_frame->data_len - current_rtp_length));
+                            media_seq_list[i] = (media_seq_list[i]) + 1;
+                            media_seq_adj_list[i] = 0;
+                            free(current_frame);
+                            break;
+                        } else
+                            media_seq_adj_list[i] = 1;
+                    }
+                }
+
+                if (media_seq_adj_list[i] == 1) {
+                    media_seq_adj_list[i] = 0;
+                    media_seq_list[i] = ra_swap_endian_uint16(
+                            ra_rtp_get_context(retrieve_task(media[i]->current.queue, -1, false)->data).sequence);
+                    media_seq_list[i] = (media_seq_list[i] == 0) ? 1 : media_seq_list[i];
+                    RA_DEBUG_MORE(YEL, "[node] id: %llu, media id: %llu, adj sequence to %llu.\n", node->id,
+                                  media[i]->id, media_seq_list[i]);
+                }
+            }
+        }
+
+        int nbCnt = opus_repacketizer_get_nb_frames(repacketizer);
+        if (nbCnt > 0) {
+            ra_task_t *repacketized_frame = create_task(RA_FRAME_SIZE);
+            repacketized_frame->data_len = opus_repacketizer_out(repacketizer, repacketized_frame->data, RA_FRAME_SIZE);
+            for (int i = 0; i < cnt_media; i++) {
+                if (!(media[i]->status & RA_MEDIA_TERMINATED) &&
+                    media[i]->type == RA_MEDIA_TYPE_LOCAL_CONSUME && media[i]->src == node->local_sock) {
+                    enqueue_task(media[i]->current.queue, repacketized_frame);
+                }
+            }
+        }
+
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        time -= ((current_time.tv_sec * 1000000000L) + current_time.tv_nsec);
+
+        calculated_delay.tv_sec = ((time / 1000000000L) > 0 ? (time / 1000000000L) : 0);
+        calculated_delay.tv_nsec = ((time % 1000000000L) > 0 ? (time % 1000000000L) : 0);
+        nanosleep(&calculated_delay, NULL);
     }
-
-    /* Wait for a joining thread. */
-//    pthread_join(heartbeat_sender, NULL);
-
-    /* Destroy the decoder state */
-    opus_decoder_destroy(decoder);
     return 0;
 }
 
